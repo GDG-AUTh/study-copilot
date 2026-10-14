@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "study-copilot": {
+      "command": "/ABSOLUTE/PATH/study-copilot/.venv/bin/python",
+      "args": ["/ABSOLUTE/PATH/study-copilot/mcp_server.py"]
+    }
+  }
+}
