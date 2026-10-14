@@ -3,6 +3,7 @@
 Useful for checking the model's output, e.g. with the grounding-critic subagent:
 
     python cli.py sample_lectures/lecture2.pdf out/lecture2.json
+    python cli.py sample_lectures/lecture2.pdf out/lecture2-local.json --private
 """
 from __future__ import annotations
 
@@ -20,11 +21,12 @@ def main(argv: list[str] | None = None, client=None) -> int:
     parser = argparse.ArgumentParser(description="Study Copilot: PDF -> JSON study pack")
     parser.add_argument("pdf", type=Path, help="lecture PDF")
     parser.add_argument("out", type=Path, help="where to save the JSON")
+    parser.add_argument("--private", action="store_true", help="use local Gemma through Ollama")
     args = parser.parse_args(argv)
 
     load_dotenv()
     try:
-        pack = llm_client.generate_study_pack(args.pdf.read_bytes(), client=client)
+        pack = llm_client.generate_study_pack(args.pdf.read_bytes(), client=client, private=args.private)
     except (OSError, llm_client.LLMError) as exc:
         print(f"Σφάλμα: {exc}", file=sys.stderr)
         return 1

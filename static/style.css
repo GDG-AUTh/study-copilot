@@ -82,3 +82,4 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); ou
 
 .definitions dt { font-weight: 600; margin-top: 12px; }
 .definitions dd { margin: 2px 0 0; }
+.toggle { display: flex; gap: 8px; align-items: center; color: var(--muted); }

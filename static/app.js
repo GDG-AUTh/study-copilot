@@ -42,7 +42,9 @@ form.addEventListener("submit", async (event) => {
 
   submitBtn.disabled = true;
   results.hidden = true;
-  setStatus("Διαβάζω τη διάλεξη… (μπορεί να πάρει λίγα δευτερόλεπτα)");
+  setStatus(document.getElementById("private").checked
+    ? "Το Gemma διαβάζει τη διάλεξη στο laptop σου… (μπορεί να πάρει 1–2 λεπτά)"
+    : "Διαβάζω τη διάλεξη… (μπορεί να πάρει λίγα δευτερόλεπτα)");
 
   try {
     const body = new FormData(form);
@@ -50,7 +52,7 @@ form.addEventListener("submit", async (event) => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Κάτι πήγε στραβά.");
     show(data);
-    setStatus(data.cached ? "Έτοιμο (από την cache)." : "Έτοιμο!");
+    setStatus(`Έτοιμο! Μοντέλο: ${data.backend}${data.cached ? " (από την cache)" : ""}.`);
   } catch (err) {
     setStatus(err.message, true);
   } finally {

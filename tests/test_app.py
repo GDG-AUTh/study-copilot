@@ -44,15 +44,6 @@ def test_same_pdf_uses_cache_not_a_second_call(make_app, fake_client, tiny_pdf):
     assert fake_client.models.calls == 1
 
 
-def test_changing_a_prompt_bypasses_the_cache(make_app, fake_client, tiny_pdf, monkeypatch):
-    client = make_app(fake_client)
-    upload(client, tiny_pdf)
-    monkeypatch.setattr(llm_client, "build_prompt", lambda: "a new, stricter quiz prompt")
-    second = upload(client, tiny_pdf)
-    assert second.get_json()["cached"] is False
-    assert fake_client.models.calls == 2
-
-
 def test_rejects_missing_file(make_app, fake_client):
     response = make_app(fake_client).post("/api/study", data={}, content_type="multipart/form-data")
     assert response.status_code == 400

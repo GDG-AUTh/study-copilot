@@ -43,6 +43,30 @@ python cli.py sample_lectures/lecture2.pdf out/lecture2.json   # υλικό σε
 - `.agents/agents/grounding-critic.md`: ο subagent που ελέγχει αν το υλικό στηρίζεται στο PDF.
 - Η καρτέλα «Ορισμοί» και ερωτήσεις quiz με απόσπασμα από τη διάλεξη.
 
+### Ιδιωτική λειτουργία (Gemma, χωρίς internet)
+
+```bash
+ollama pull gemma3:1b       # μία φορά, περίπου 0,8 GB
+python app.py               # τσέκαρε «Ιδιωτική λειτουργία» στη σελίδα
+```
+Το PDF δεν φεύγει από τον υπολογιστή σου. Για καλύτερες απαντήσεις, με καλή σύνδεση και 8 GB RAM ή περισσότερο: `ollama pull gemma4:e2b` (περίπου 7 GB) και `LOCAL_MODEL=gemma4:e2b` στο `.env`.
+
+### MCP server (το app ως εργαλείο για agents)
+
+Στο Antigravity: Settings → Customizations → Open MCP Config, και πρόσθεσε (με το δικό σου απόλυτο path από το `pwd`):
+
+```json
+{
+  "mcpServers": {
+    "study-copilot": {
+      "command": "/ABSOLUTE/PATH/study-copilot/.venv/bin/python",
+      "args": ["/ABSOLUTE/PATH/study-copilot/mcp_server.py"]
+    }
+  }
+}
+```
+Εργαλεία: `summarize_lecture`, `make_flashcards`, `make_quiz` (όλα με προαιρετικό `private`). Χρειάζεται `mcp<2` (είναι ήδη στο `requirements.txt`).
+
 ## Στην αρχή του workshop: εγκαταστάσεις
 
 Δεν χρειάζεται να έχεις ετοιμάσει τίποτα από πριν. Στην αρχή του workshop, όσο ακούς την εισαγωγή, κατεβάζεις και εγκαθιστάς:
