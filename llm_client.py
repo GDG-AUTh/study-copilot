@@ -16,10 +16,10 @@ MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 # Study modes, in the order they appear in the UI. Each mode has prompts/<mode>.md.
-MODES = ["summary", "flashcards", "quiz"]
+MODES = ["summary", "flashcards", "quiz", "definitions"]
 
 # Expected number of items per mode (min, max).
-COUNTS = {"summary": (6, 8), "flashcards": (10, 10), "quiz": (5, 5)}
+COUNTS = {"summary": (6, 8), "flashcards": (10, 10), "quiz": (5, 5), "definitions": (5, 15)}
 
 
 class SummaryBullet(BaseModel):
@@ -38,6 +38,13 @@ class QuizQuestion(BaseModel):
     options: list[str]
     answer_index: int
     explanation: str
+    source_quote: str
+    page: int
+
+
+class Definition(BaseModel):
+    term: str
+    definition: str
     page: int
 
 
@@ -47,6 +54,7 @@ class StudyPack(BaseModel):
     summary: list[SummaryBullet]
     flashcards: list[Flashcard]
     quiz: list[QuizQuestion]
+    definitions: list[Definition]
 
 
 class LLMError(Exception):

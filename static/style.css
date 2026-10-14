@@ -79,3 +79,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); ou
 .feedback.ok { color: var(--ok); }
 .feedback.bad { color: var(--bad); }
 .score { font-size: 20px; font-weight: 700; margin-top: 16px; }
+
+.definitions dt { font-weight: 600; margin-top: 12px; }
+.definitions dd { margin: 2px 0 0; }

@@ -12,6 +12,7 @@ const TABS = [
   { key: "summary", label: "Περίληψη", render: renderSummary },
   { key: "flashcards", label: "Flashcards", render: renderFlashcards },
   { key: "quiz", label: "Quiz", render: renderQuiz },
+  { key: "definitions", label: "Ορισμοί", render: renderDefinitions },
 ];
 
 function el(tag, attrs = {}, ...children) {
@@ -133,11 +134,18 @@ function renderQuiz(questions) {
         const ok = picked && Number(picked.value) === q.answer_index;
         if (ok) correct++;
         fb.className = `feedback ${ok ? "ok" : "bad"}`;
-        fb.textContent = `${ok ? "✓ Σωστό." : `✗ Σωστή απάντηση: ${q.options[q.answer_index]}.`} ${q.explanation} (σελ. ${q.page})`;
+        fb.textContent = `${ok ? "✓ Σωστό." : `✗ Σωστή απάντηση: ${q.options[q.answer_index]}.`} ${q.explanation} «${q.source_quote}» (σελ. ${q.page})`;
       });
       score.textContent = `Σκορ: ${correct} / ${questions.length}`;
     },
   }, "Έλεγξε τις απαντήσεις");
   container.append(check, score);
   return container;
+}
+
+function renderDefinitions(items) {
+  return el("dl", { class: "definitions" }, ...items.flatMap((d) => [
+    el("dt", {}, d.term, page(d.page)),
+    el("dd", {}, d.definition),
+  ]));
 }

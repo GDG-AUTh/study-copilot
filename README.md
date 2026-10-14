@@ -34,7 +34,14 @@ pip install -r requirements.txt
 cp .env.example .env               # και βάλε το GEMINI_API_KEY σου μέσα στο .env
 python app.py                      # άνοιξε http://127.0.0.1:8000
 pytest                             # τα tests τρέχουν και χωρίς internet
+python cli.py sample_lectures/lecture2.pdf out/lecture2.json   # υλικό σε JSON, π.χ. για τον grounding-critic
 ```
+
+Σε αυτό το checkpoint υπάρχουν επίσης:
+- `AGENTS.md`: οι κανόνες που διαβάζει ο agent σε κάθε μήνυμα.
+- `.agents/skills/add-study-mode/`: η «συνταγή» για νέο study mode.
+- `.agents/agents/grounding-critic.md`: ο subagent που ελέγχει αν το υλικό στηρίζεται στο PDF.
+- Η καρτέλα «Ορισμοί» και ερωτήσεις quiz με απόσπασμα από τη διάλεξη.
 
 ## Στην αρχή του workshop: εγκαταστάσεις
 
