@@ -1,0 +1,81 @@
+:root {
+  --ink: #1e1e1e;
+  --muted: #5f6368;
+  --bg: #f8f9fa;
+  --card: #ffffff;
+  --accent: #1a73e8;
+  --ok: #188038;
+  --bad: #c5221f;
+  --line: #dadce0;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+header, main, footer { max-width: 860px; margin: 0 auto; padding: 0 16px; }
+header { padding-top: 32px; }
+h1 { margin: 0 0 4px; }
+header p, footer { color: var(--muted); }
+footer { padding: 32px 16px; font-size: 14px; }
+
+form {
+  display: grid;
+  gap: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 24px 0 8px;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  padding: 8px 14px;
+}
+button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+#submit { background: var(--accent); color: #fff; border-color: var(--accent); justify-self: start; }
+#submit:disabled { opacity: 0.6; cursor: wait; }
+
+#status { min-height: 1.5em; color: var(--muted); }
+#status.error { color: var(--bad); }
+
+[role="tablist"] { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+[role="tab"][aria-selected="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+.page { color: var(--muted); font-size: 13px; white-space: nowrap; }
+
+.summary li { margin-bottom: 8px; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.card {
+  min-height: 130px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px;
+}
+.card[aria-pressed="true"] { background: #e8f0fe; border-color: var(--accent); }
+.card .hint { color: var(--muted); font-size: 12px; }
+
+.question { border-bottom: 1px solid var(--line); padding: 12px 0; }
+.question fieldset { border: 0; padding: 0; margin: 0; }
+.question legend { font-weight: 600; margin-bottom: 6px; }
+.question label { display: block; padding: 4px 0; }
+.feedback { margin-top: 6px; }
+.feedback.ok { color: var(--ok); }
+.feedback.bad { color: var(--bad); }
+.score { font-size: 20px; font-weight: 700; margin-top: 16px; }

@@ -23,7 +23,18 @@ study-copilot/
     └── templates/         ← κανόνες, skill, subagent, MCP config
 ```
 
-Ο κώδικας του app **δεν υπάρχει ακόμα**: θα τον γράψει ο agent μαζί σου, στο Μέρος 3.
+> Βρίσκεσαι σε **checkpoint branch**: εδώ υπάρχει ήδη η έτοιμη λύση. Δες «Τρέξε το app» πιο κάτω.
+
+## Τρέξε το app
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env               # και βάλε το GEMINI_API_KEY σου μέσα στο .env
+python app.py                      # άνοιξε http://127.0.0.1:8000
+pytest                             # τα tests τρέχουν και χωρίς internet
+```
 
 ## Στην αρχή του workshop: εγκαταστάσεις
 

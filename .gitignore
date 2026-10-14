@@ -9,3 +9,8 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+
+# Secrets and local data
+.env
+.cache/
+out/
