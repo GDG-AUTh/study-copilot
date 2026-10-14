@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "study-copilot": {
+      "command": "<PROJECT_ROOT>/.venv/bin/python",
+      "args": ["<PROJECT_ROOT>/mcp_server.py"],
+      "cwd": "<PROJECT_ROOT>"
+    }
+  }
+}
