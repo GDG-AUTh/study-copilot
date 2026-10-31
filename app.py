@@ -43,7 +43,7 @@ def create_app(client=None, cache_dir: str | Path | None = None, ollama_client=N
                 data, cache, private=private, client=client, ollama_client=ollama_client)
         except llm_client.LLMError as exc:
             return error(str(exc), 502)
-        backend = f"Gemma ({llm_client.LOCAL_MODEL}, τοπικά)" if private else "Gemini"
+        backend = f"Gemma ({llm_client.LOCAL_MODEL}, τοπικά)" if private else f"Gemini ({llm_client.MODEL})"
         return jsonify(payload | {"cached": cached, "backend": backend})
 
     @app.errorhandler(413)

@@ -41,7 +41,7 @@ def _pack(pdf_path: str, private: bool) -> dict:
 
 @mcp.tool()
 def summarize_lecture(pdf_path: str, private: bool = False) -> dict:
-    """Summarise a university lecture PDF in 6-8 bullets, each with its page number.
+    """Summarise a university lecture PDF in bullets, each with its page number.
 
     Use when the user wants a summary, an overview or the main ideas of a lecture.
     pdf_path: absolute path to the lecture PDF.
@@ -51,14 +51,14 @@ def summarize_lecture(pdf_path: str, private: bool = False) -> dict:
 
 
 @mcp.tool()
-def make_flashcards(pdf_path: str, count: int = 10, private: bool = False) -> dict:
+def make_flashcards(pdf_path: str, count: int = 20, private: bool = False) -> dict:
     """Create flashcards (front/back, with page numbers) from a university lecture PDF.
 
     Use when the user wants flashcards or wants to memorise the key facts of a lecture.
-    pdf_path: absolute path to the lecture PDF. count: how many cards (1-10, default 10).
+    pdf_path: absolute path to the lecture PDF. count: how many cards (1-40, default 20).
     private: true to use the local Gemma model, so the file never leaves this computer.
     """
-    count = max(1, min(count, 10))
+    count = max(1, min(count, 40))
     return {"flashcards": _pack(pdf_path, private)["flashcards"][:count]}
 
 
@@ -69,10 +69,10 @@ def make_quiz(pdf_path: str, questions: int = 5, private: bool = False) -> dict:
     Each question has 4 options, the index of the correct answer, an explanation,
     a supporting quote and the page. Use when the user wants to test themselves on a
     lecture. Ask the questions one at a time and do not reveal answers before the user replies.
-    pdf_path: absolute path to the lecture PDF. questions: how many (1-5, default 5).
+    pdf_path: absolute path to the lecture PDF. questions: how many (1-15, default 5).
     private: true to use the local Gemma model, so the file never leaves this computer.
     """
-    questions = max(1, min(questions, 5))
+    questions = max(1, min(questions, 15))
     return {"quiz": _pack(pdf_path, private)["quiz"][:questions]}
 
 

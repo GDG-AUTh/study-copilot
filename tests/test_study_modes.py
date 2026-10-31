@@ -38,15 +38,12 @@ def test_missing_field_gives_friendly_error(make_app, pack_json, tiny_pdf):
     assert "λάθος μορφή" in response.get_json()["error"]
 
 
-def test_invalid_answer_index_is_rejected(pack_json):
+def test_invalid_quiz_question_is_dropped(pack_json):
     quiz = json.loads(pack_json)["quiz"]
     quiz[0]["answer_index"] = 7
-    try:
-        llm_client.parse_study_pack(bad_json(quiz=quiz))
-    except llm_client.LLMError as exc:
-        assert "σωστή απάντηση" in str(exc)
-    else:
-        raise AssertionError("expected LLMError")
+    result = llm_client.parse_study_pack(bad_json(quiz=quiz))
+    assert len(result.quiz) == 4
+    assert quiz[0]["question"] not in [q.question for q in result.quiz]
 
 
 def test_cli_saves_json(tmp_path, fake_client, no_network):

@@ -1,4 +1,5 @@
 ## summary
 
-6 to 8 bullets that summarise the most important ideas of the lecture, in the order they appear.
-Each bullet is one or two sentences and has the page where the idea appears.
+About {{n_summary}} bullets that summarise the lecture, in the order the ideas appear.
+- Each bullet is one or two dense sentences that state a key idea with its essential detail (e.g. the complexity, the condition, the trade-off), not a vague heading.
+- `page`: where the idea appears.

@@ -13,21 +13,37 @@ FIXTURES = ROOT / "tests" / "fixtures"
 
 
 class FakeModels:
-    def __init__(self, text: str):
+    """Answers each call according to the schema it asks for (notes or study pack)."""
+
+    def __init__(self, text: str, notes: str | None = None):
         self.text = text
+        self.notes = notes or (FIXTURES / "notes.json").read_text(encoding="utf-8")
         self.calls = 0
+        self.all_kwargs = []
 
     def generate_content(self, **kwargs):
         self.calls += 1
         self.last_kwargs = kwargs
+        self.all_kwargs.append(kwargs)
+        schema = getattr(kwargs["config"], "response_schema", None)
+        if getattr(schema, "__name__", "") == "LectureNotes":
+            return SimpleNamespace(text=self.notes)
         return SimpleNamespace(text=self.text)
 
 
 class FakeClient:
     """Looks like google.genai.Client for the parts we use."""
 
-    def __init__(self, text: str):
-        self.models = FakeModels(text)
+    def __init__(self, text: str, notes: str | None = None):
+        self.models = FakeModels(text, notes)
+
+
+@pytest.fixture(autouse=True)
+def no_sleep(monkeypatch):
+    """Retries wait between attempts; tests should not."""
+    import llm_client
+
+    monkeypatch.setattr(llm_client.time, "sleep", lambda s: None)
 
 
 @pytest.fixture

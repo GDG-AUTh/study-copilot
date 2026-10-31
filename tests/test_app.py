@@ -28,12 +28,17 @@ def test_study_returns_summary_flashcards_and_quiz(make_app, fake_client, tiny_p
     assert data["cached"] is False
 
 
-def test_pdf_and_prompt_are_sent_to_the_model(make_app, fake_client, tiny_pdf):
+def test_slides_are_read_first_then_material_is_written(make_app, fake_client, tiny_pdf):
     upload(make_app(fake_client), tiny_pdf)
-    kwargs = fake_client.models.last_kwargs
-    assert kwargs["model"] == llm_client.MODEL
-    assert kwargs["config"].response_mime_type == "application/json"
-    assert any("study assistant" in str(part) for part in kwargs["contents"])
+    read, write = fake_client.models.all_kwargs
+    for kwargs in (read, write):
+        assert kwargs["model"] == llm_client.MODEL
+        assert kwargs["config"].response_mime_type == "application/json"
+    assert read["config"].response_schema is llm_client.LectureNotes
+    assert any("--- Σελίδα 1 ---" in str(part) for part in read["contents"])
+    assert write["config"].response_schema is llm_client.StudyPack
+    assert any("teaching assistant" in str(part) for part in write["contents"])
+    assert any("Lecture notes" in str(part) for part in write["contents"])
 
 
 def test_same_pdf_uses_cache_not_a_second_call(make_app, fake_client, tiny_pdf):
@@ -41,7 +46,7 @@ def test_same_pdf_uses_cache_not_a_second_call(make_app, fake_client, tiny_pdf):
     upload(client, tiny_pdf)
     second = upload(client, tiny_pdf)
     assert second.get_json()["cached"] is True
-    assert fake_client.models.calls == 1
+    assert fake_client.models.calls == 2  # read + write, only for the first upload
 
 
 def test_rejects_missing_file(make_app, fake_client):
@@ -70,12 +75,15 @@ def test_invalid_json_gives_friendly_error(make_app, tiny_pdf):
     assert "λάθος μορφή" in response.get_json()["error"]
 
 
-def test_quiz_with_four_questions_is_rejected(make_app, pack_json, tiny_pdf):
+def test_too_few_quiz_questions_asks_again_then_fails(make_app, pack_json, tiny_pdf):
     import json
-    four = json.loads(pack_json)["quiz"][:4]
-    response = upload(make_app(FakeClient(bad_json(quiz=four))), tiny_pdf)
+    two = json.loads(pack_json)["quiz"][:2]
+    fake = FakeClient(bad_json(quiz=two))
+    response = upload(make_app(fake), tiny_pdf)
     assert response.status_code == 502
     assert "quiz" in response.get_json()["error"]
+    assert fake.models.calls == 3  # read + write + one more write with feedback
+    assert "rejected" in str(fake.models.last_kwargs["contents"][-1])
 
 
 def test_missing_api_key_message(monkeypatch):

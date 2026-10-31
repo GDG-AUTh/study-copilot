@@ -1,4 +1,5 @@
 {
+ "title": "Ταξινόμηση",
  "summary": [
   {
    "text": "Η ταξινόμηση αναδιατάσσει τα στοιχεία μιας ακολουθίας σε αύξουσα ή φθίνουσα σειρά.",
@@ -33,52 +34,62 @@
   {
    "front": "Τι σημαίνει σταθερός αλγόριθμος ταξινόμησης;",
    "back": "Ίσα στοιχεία διατηρούν τη σχετική τους σειρά.",
-   "page": 1
+   "page": 1,
+   "kind": "definition"
   },
   {
    "front": "Πολυπλοκότητα insertion sort στη χειρότερη περίπτωση;",
    "back": "O(n²).",
-   "page": 2
+   "page": 2,
+   "kind": "concept"
   },
   {
    "front": "Πότε ο insertion sort είναι O(n);",
    "back": "Όταν ο πίνακας είναι ήδη ταξινομημένος.",
-   "page": 2
+   "page": 2,
+   "kind": "application"
   },
   {
    "front": "Ποια τεχνική χρησιμοποιεί ο merge sort;",
    "back": "Διαίρει και βασίλευε.",
-   "page": 3
+   "page": 3,
+   "kind": "process"
   },
   {
    "front": "Αναδρομική σχέση του merge sort;",
    "back": "T(n) = 2T(n/2) + O(n).",
-   "page": 3
+   "page": 3,
+   "kind": "concept"
   },
   {
    "front": "Επιπλέον μνήμη του merge sort;",
    "back": "O(n).",
-   "page": 3
+   "page": 3,
+   "kind": "concept"
   },
   {
    "front": "Τι είναι το pivot στον quicksort;",
    "back": "Το στοιχείο-οδηγός γύρω από το οποίο γίνεται η διαμέριση.",
-   "page": 4
+   "page": 4,
+   "kind": "definition"
   },
   {
    "front": "Πώς αποφεύγουμε τη χειρότερη περίπτωση του quicksort;",
    "back": "Με τυχαίο οδηγό ή «διάμεσο τριών».",
-   "page": 4
+   "page": 4,
+   "kind": "application"
   },
   {
    "front": "Κάτω φράγμα ταξινόμησης με συγκρίσεις;",
    "back": "Ω(n log n).",
-   "page": 5
+   "page": 5,
+   "kind": "concept"
   },
   {
    "front": "Τι συνδυάζει η Timsort;",
    "back": "Merge sort και insertion sort.",
-   "page": 5
+   "page": 5,
+   "kind": "comparison"
   }
  ],
  "quiz": [
@@ -93,7 +104,8 @@
    "answer_index": 1,
    "explanation": "Ο merge sort ικανοποιεί T(n) = 2T(n/2) + O(n) σε κάθε περίπτωση.",
    "source_quote": "Αναδρομική σχέση: T(n) = 2T(n/2) + O(n), άρα T(n) = O(n log n) σε κάθε περίπτωση.",
-   "page": 3
+   "page": 3,
+   "difficulty": "easy"
   },
   {
    "question": "Ποιος από τους τρεις δεν είναι σταθερός στην κλασική υλοποίηση;",
@@ -106,7 +118,8 @@
    "answer_index": 2,
    "explanation": "Η κλασική υλοποίηση του quicksort δεν διατηρεί τη σειρά των ίσων στοιχείων.",
    "source_quote": "In-place με στοίβα αναδρομής O(log n) κατά μέσο όρο. Η κλασική υλοποίηση δεν είναι σταθερή.",
-   "page": 4
+   "page": 4,
+   "difficulty": "medium"
   },
   {
    "question": "Πόση επιπλέον μνήμη χρειάζεται ο insertion sort;",
@@ -119,7 +132,8 @@
    "answer_index": 0,
    "explanation": "Ο insertion sort δουλεύει in-place.",
    "source_quote": "Επιπλέον μνήμη O(1) (in-place) και είναι σταθερός.",
-   "page": 2
+   "page": 2,
+   "difficulty": "hard"
   },
   {
    "question": "Πότε εμφανίζεται η χειρότερη περίπτωση του quicksort;",
@@ -132,7 +146,8 @@
    "answer_index": 1,
    "explanation": "Τότε η διαμέριση είναι εντελώς ανισόρροπη και ο χρόνος γίνεται O(n²).",
    "source_quote": "Χειρότερη περίπτωση O(n²): όταν ο οδηγός είναι συνεχώς το μικρότερο ή το μεγαλύτερο στοιχείο",
-   "page": 4
+   "page": 4,
+   "difficulty": "medium"
   },
   {
    "question": "Ποιο είναι το κάτω φράγμα για ταξινόμηση με συγκρίσεις;",
@@ -145,7 +160,8 @@
    "answer_index": 2,
    "explanation": "Κάθε ταξινόμηση με συγκρίσεις χρειάζεται Ω(n log n) συγκρίσεις στη χειρότερη περίπτωση.",
    "source_quote": "Κάθε αλγόριθμος ταξινόμησης που βασίζεται σε συγκρίσεις χρειάζεται Ω(n log n) συγκρίσεις στη χειρότερη περίπτωση.",
-   "page": 5
+   "page": 5,
+   "difficulty": "easy"
   }
  ],
  "definitions": [

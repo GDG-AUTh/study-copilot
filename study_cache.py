@@ -2,6 +2,7 @@
 
 The same PDF never costs a second model call, but editing a prompt in prompts/
 or switching model (GEMINI_MODEL, LOCAL_MODEL) gives a fresh answer.
+Failed answers are never cached.
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ def get_or_create(pdf_bytes: bytes, cache_dir: Path, private: bool = False,
     """Return (study pack as dict, came_from_cache)."""
     backend = "local" if private else "cloud"
     model = llm_client.LOCAL_MODEL if private else llm_client.MODEL
-    key = hashlib.sha256(pdf_bytes + model.encode() + llm_client.build_prompt().encode()).hexdigest()
+    key = hashlib.sha256(pdf_bytes + model.encode() + llm_client.prompts_fingerprint().encode()).hexdigest()
     path = Path(cache_dir) / f"{key}-{backend}.json"
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8")), True
