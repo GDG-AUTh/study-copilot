@@ -2,10 +2,11 @@
 
 One interface, two backends:
 - Gemini (cloud), in two steps:
-    1. "read": Gemini reads the slides (text, diagrams, tables, code) and writes
+    1. "read": a fast model reads the slides (text, diagrams, tables, code) and writes
        faithful notes for every page.
-    2. "generate": from the notes and the PDF it writes the study material.
-  Splitting reading from writing gives much better flashcards and correct pages.
+    2. "write": from the notes and the PDF, one call per study mode, all at the same time.
+  Splitting reading from writing gives much better flashcards and correct pages, and
+  parallel calls mean the whole thing takes as long as the slowest mode, not their sum.
 - Gemma (local, through Ollama): we extract the text with pypdf and do one step.
 Both return the same validated StudyResult, so the rest of the app never knows
 which one answered.
@@ -24,6 +25,8 @@ import io
 import os
 import re
 import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Literal
@@ -37,9 +40,16 @@ load_dotenv(Path(__file__).parent / ".env", override=True)
 # Main model and fallbacks. Change them here (or with the env vars), nowhere else.
 # Vertex AI has no "latest" aliases, so it needs real model names.
 _VERTEX = bool(os.environ.get("GOOGLE_CLOUD_PROJECT"))
-# Pro writes the deepest cards (about 2.5 minutes per lecture); 3.5 Flash is close and takes 1 minute.
+# Pro writes the deepest cards; 3.5 Flash is the fallback.
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview" if _VERTEX else "gemini-flash-latest")
 _FALLBACKS = "gemini-3.5-flash" if _VERTEX else "gemini-2.5-flash"
+# Reading needs accuracy more than depth, so it uses the fast model with little thinking
+# (8 s instead of 25 s for six pages, with notes of the same length).
+NOTES_MODEL = os.environ.get("GEMINI_NOTES_MODEL", "gemini-3.5-flash" if _VERTEX else MODEL)
+NOTES_THINKING = os.environ.get("GEMINI_NOTES_THINKING", "low")
+# Also while writing: Pro takes 36 s instead of 74 s, with cards that are a little shorter.
+# Set it to "high" for the most detailed cards; empty means the model's own default.
+WRITE_THINKING = os.environ.get("GEMINI_WRITE_THINKING", "low") or None
 FALLBACK_MODELS = [m.strip() for m in os.environ.get("GEMINI_FALLBACK_MODELS", _FALLBACKS).split(",") if m.strip()]
 
 # Local model for private mode and for when Gemini is unavailable.
@@ -53,6 +63,14 @@ MAX_LOCAL_PAGES = int(os.environ.get("MAX_LOCAL_PAGES", 30))
 # Above this size the PDF goes through the Gemini Files API instead of inline
 # (inline requests are limited to 20 MB, and base64 makes the PDF ~33% bigger).
 INLINE_PDF_LIMIT = 14 * 1024 * 1024
+
+# Heavier PDFs (usually scans) go only to the reading step: the notes hold what they say,
+# and sending the file once per mode would cost minutes of upload.
+WRITE_PDF_LIMIT = 5 * 1024 * 1024
+
+# Long lectures get their flashcards in parts, so that every part of the lecture gets cards.
+FLASHCARD_CHUNK_PAGES = 12
+MAX_WRITERS = 8
 
 # How many times to retry a temporary Gemini error (rate limit, overloaded server).
 MAX_RETRIES = int(os.environ.get("GEMINI_MAX_RETRIES", 3))
@@ -128,6 +146,27 @@ class StudyPack(BaseModel):
     definitions: list[Definition]
 
 
+# One schema per mode, for the parallel "write" calls.
+
+class SummaryPart(BaseModel):
+    summary: list[SummaryBullet]
+
+
+class FlashcardsPart(BaseModel):
+    flashcards: list[Flashcard]
+
+
+class QuizPart(BaseModel):
+    quiz: list[QuizQuestion]
+
+
+class DefinitionsPart(BaseModel):
+    definitions: list[Definition]
+
+
+PART_SCHEMAS = {"summary": SummaryPart, "flashcards": FlashcardsPart, "quiz": QuizPart, "definitions": DefinitionsPart}
+
+
 # What the app gets back: the pack, plus what Python checked afterwards.
 
 class CheckedQuestion(QuizQuestion):
@@ -177,15 +216,15 @@ def target_counts(pages: int) -> dict[str, int]:
     pages = max(pages, 1)
     return {
         "summary": min(max(pages + 2, 6), 14),
-        "flashcards": min(max(pages * 3, 12), 40),
+        "flashcards": min(max(pages * 2, 18), 40),
         "quiz": min(max(pages + 2, 6), 15),
         "definitions": min(max(pages * 2, 6), 25),
     }
 
 
-def build_prompt(pages: int = 10) -> str:
-    """The prompt for the "generate" step: shared rules plus the prompt of every mode."""
-    parts = [_read_prompt("base")] + [_read_prompt(mode) for mode in MODES]
+def build_prompt(pages: int = 10, modes: list[str] | None = None) -> str:
+    """The prompt for writing: shared rules plus the prompt of the given modes (default all)."""
+    parts = [_read_prompt("base")] + [_read_prompt(mode) for mode in modes or MODES]
     prompt = "\n\n".join(parts)
     for mode, n in target_counts(pages).items():
         prompt = prompt.replace(f"{{{{n_{mode}}}}}", str(n))
@@ -223,11 +262,15 @@ def with_page_markers(texts: list[str]) -> str:
 
 # Public entry point
 
-def generate_study_pack(pdf_bytes: bytes, client=None, private: bool = False, ollama_client=None) -> StudyResult:
-    """Return a checked StudyResult, from Gemini (default) or local Gemma (private=True)."""
+def generate_study_pack(pdf_bytes: bytes, client=None, private: bool = False, ollama_client=None,
+                        on_progress: Callable[[dict], None] | None = None) -> StudyResult:
+    """Return a checked StudyResult, from Gemini (default) or local Gemma (private=True).
+
+    on_progress receives the material finished so far, while Gemini is still writing the rest.
+    """
     if private:
         return _generate_local(pdf_bytes, ollama_client)
-    return _generate_gemini(pdf_bytes, client)
+    return _generate_gemini(pdf_bytes, client, on_progress)
 
 
 # Gemini
@@ -255,42 +298,78 @@ def _default_client():
     return genai.Client(api_key=key, http_options=http)
 
 
-def _generate_gemini(pdf_bytes: bytes, client=None) -> StudyResult:
+def _generate_gemini(pdf_bytes: bytes, client=None, on_progress=None) -> StudyResult:
     from google.genai import types
 
     texts = page_texts(pdf_bytes)
     n_pages = len(texts)
     client = client or _default_client()
     pdf_part, uploaded = _pdf_part(client, pdf_bytes, types)
+    report = on_progress or (lambda partial: None)
     try:
         # Step 1: read the slides, page by page.
         anchors = with_page_markers(texts)
         notes_contents = [pdf_part, build_notes_prompt().replace("{{n_pages}}", str(n_pages))]
         if anchors:
             notes_contents.append("# Text extracted from the PDF (to match page numbers)\n\n" + anchors)
-        notes_raw = _call_gemini(client, notes_contents, LectureNotes)
-        notes = _parse(LectureNotes, notes_raw)
+        notes = _parse(LectureNotes, _call_gemini(client, notes_contents, LectureNotes,
+                                                    first_model=NOTES_MODEL, thinking=NOTES_THINKING))
 
-        # Step 2: write the study material from the notes and the PDF.
-        prompt = build_prompt(n_pages)
-        notes_text = "# Lecture notes (page by page)\n\n" + notes.model_dump_json(indent=1)
-        feedback = ""
-        for attempt in range(2):
-            raw = _call_gemini(client, [pdf_part, notes_text, prompt + feedback], StudyPack)
-            pack = _parse(StudyPack, raw)
-            result = finalize(pack, texts)
-            problem = shortfall(result)
-            if not problem:
-                return result
-            feedback = (f"\n\nIMPORTANT: your previous answer was rejected because {problem}. "
-                        "Follow the requested counts exactly.")
-        raise LLMError(f"Το μοντέλο δεν έφτιαξε αρκετό υλικό ({problem}). Δοκίμασε ξανά.")
+        # Step 2: write every mode from the notes (and the PDF, if it is light), at the same time.
+        sources = [pdf_part] if len(pdf_bytes) <= WRITE_PDF_LIMIT else []
+        found: dict[str, list] = {mode: [] for mode in MODES}
+        report(finalize(StudyPack(title=notes.title, **found), texts).model_dump())
+        pool = ThreadPoolExecutor(max_workers=MAX_WRITERS)
+        try:
+            jobs = {pool.submit(_write_mode, client, pool, mode, sources, notes, n_pages, texts): mode
+                    for mode in MODES}
+            for job in as_completed(jobs):
+                found[jobs[job]] = job.result()
+                report(finalize(StudyPack(title=notes.title, **found), texts).model_dump())
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)  # a failed mode should not wait for the others
+        return finalize(StudyPack(title=notes.title, **found), texts)
     finally:
         if uploaded is not None:
             try:
                 client.files.delete(name=uploaded.name)
             except Exception:
                 pass  # the Files API deletes it anyway after 48 hours
+
+
+def _write_mode(client, pool, mode: str, sources: list, notes: LectureNotes, n_pages: int, texts: list[str]) -> list:
+    """Write one study mode. If too little survives the checks, ask once more for that mode only."""
+    usable, low = 0, MIN_COUNTS[mode]
+    feedback = ""
+    for _ in range(2):
+        items = _write_items(client, pool, mode, sources, notes, n_pages, feedback)
+        empty = {m: [] for m in MODES}
+        usable = len(getattr(finalize(StudyPack(title="", **(empty | {mode: items})), texts), mode))
+        if usable >= low:
+            return items
+        feedback = (f"\n\nIMPORTANT: your previous answer was rejected because only {usable} items of "
+                    f"«{mode}» were usable, and at least {low} are needed. Follow the requested count.")
+    raise LLMError(f"Το μοντέλο δεν έφτιαξε αρκετό υλικό για «{mode}» ({usable} από τα {low} που χρειάζονται). "
+                   "Δοκίμασε ξανά.")
+
+
+def _write_items(client, pool, mode, sources, notes, n_pages, feedback) -> list:
+    schema = PART_SCHEMAS[mode]
+
+    def write(part_notes: LectureNotes, pages: int) -> list:
+        contents = [*sources, "# Lecture notes (page by page)\n\n" + part_notes.model_dump_json(indent=1),
+                    build_prompt(pages, [mode]) + feedback]
+        return getattr(_parse(schema, _call_gemini(client, contents, schema, thinking=WRITE_THINKING)), mode)
+
+    size = FLASHCARD_CHUNK_PAGES
+    if mode != "flashcards" or len(notes.pages) <= size:
+        return write(notes, n_pages)
+    # A separate call for each part of a long lecture. Sources are left out: the notes of that
+    # part keep the model on it.
+    sources = []
+    parts = [notes.pages[i:i + size] for i in range(0, len(notes.pages), size)]
+    calls = [pool.submit(write, LectureNotes(title=notes.title, pages=part), len(part)) for part in parts]
+    return [card for call in calls for card in call.result()]
 
 
 def _pdf_part(client, pdf_bytes: bytes, types):
@@ -316,13 +395,17 @@ def _pdf_part(client, pdf_bytes: bytes, types):
     return uploaded, uploaded
 
 
-def _call_gemini(client, contents, schema) -> str:
+def _call_gemini(client, contents, schema, first_model: str | None = None, thinking: str | None = None) -> str:
     """One structured call, with retries for temporary errors and fallback models."""
     from google.genai import types
 
-    config = types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema)
+    def config_with(level):
+        extra = {"thinking_config": types.ThinkingConfig(thinking_level=level)} if level else {}
+        return types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema, **extra)
+
+    config = config_with(thinking)
     last: Exception | None = None
-    for model in [MODEL] + [m for m in FALLBACK_MODELS if m != MODEL]:
+    for model in dict.fromkeys([first_model or MODEL, MODEL, *FALLBACK_MODELS]):
         for attempt in range(MAX_RETRIES):
             try:
                 response = client.models.generate_content(model=model, contents=contents, config=config)
@@ -331,6 +414,9 @@ def _call_gemini(client, contents, schema) -> str:
                     raise _Retryable("empty response")
                 return text
             except Exception as exc:
+                if "thinking" in str(exc).lower() and getattr(config, "thinking_config", None):
+                    config = config_with(None)  # older models do not have this setting
+                    continue
                 problem = exc if isinstance(exc, _Retryable) else _classify(exc)
                 if isinstance(problem, LLMError):
                     raise problem from exc

@@ -9,5 +9,5 @@ Rules:
 - Cover the WHOLE lecture: spread the items over all pages that teach something, not only the first ones.
 - Prefer what an examiner would ask: definitions, properties, complexities, differences between methods, when to use what, why something works, how an algorithm proceeds step by step.
 - Be specific and self-contained: every item must make sense without seeing the slide. Never write "όπως φαίνεται στη διαφάνεια" or "ο αλγόριθμος της διάλεξης".
-- `title`: the title of the lecture.
+- `title` (when the schema has it): the title of the lecture.
 - Answer only with JSON that matches the given schema. No text outside the JSON.

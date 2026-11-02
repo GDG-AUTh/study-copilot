@@ -7,9 +7,10 @@ const fileInput = $("pdf");
 const tabsEl = $("tabs");
 const panelsEl = $("panels");
 
-const MAX_MB = 20;
+const MAX_MB = 50;
 const RECENT_KEY = "study-copilot-recent";
 const THEME_KEY = "study-copilot-theme";
+const JOB_KEY = "study-copilot-job";
 
 // One entry per tab. To add a study mode, add a renderer here.
 const TABS = [
@@ -30,6 +31,10 @@ let currentTitle = "";
 let pdfUrl = null; // lets page numbers open the uploaded PDF at that page
 let deckKeys = null; // keyboard handler of the current flashcard deck
 let status = null;
+let results = null; // the lecture on screen: which tabs are filled, and whether the user picked one
+let following = 0; // changes when we stop following a job
+let elapsed = "0:00";
+let clockStart = 0;
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -51,6 +56,12 @@ function store(key, value) {
   try {
     localStorage.setItem(key, value);
   } catch { /* private window or full storage: the app works without it */ }
+}
+
+function forget(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch { /* nothing to forget */ }
 }
 
 function load(key) {
@@ -170,52 +181,94 @@ async function generate(file) {
   body.append("engine", form.elements.engine.value);
 
   show("working");
-  const stopProgress = startProgress();
+  showWorking(form.elements.engine.value === "local" ? "local" : "cloud");
+  const stopClock = startClock();
   try {
-    const response = await fetch("/api/study", { method: "POST", body });
+    const response = await fetch("/api/jobs", { method: "POST", body });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Κάτι πήγε στραβά.");
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
     pdfUrl = URL.createObjectURL(file);
-    saveRecent(data);
-    showResults(data);
+    store(JOB_KEY, data.id);
+    followJob(data.id, stopClock);
   } catch (err) {
-    show("start");
-    showError(err instanceof TypeError ? "Δεν ήταν δυνατή η σύνδεση με την εφαρμογή. Τρέχει ακόμα;" : err.message);
+    stopClock();
+    failed(err);
   } finally {
-    stopProgress();
     fileInput.value = "";
-    refreshStatus();
   }
 }
 
-// The screen says which engine is really working, by asking the server.
-function startProgress() {
-  const started = Date.now();
-  const render = (working) => {
-    const local = working === "local";
-    $("working-title").textContent = local ? "Το τοπικό μοντέλο γράφει το υλικό" : "Το Gemini διαβάζει τις διαφάνειες";
-    $("working-text").textContent = local
-      ? "Δουλεύει στον υπολογιστή σου, οπότε μπορεί να πάρει μερικά λεπτά. Κράτα αυτή τη σελίδα ανοιχτή."
-      : "Πρώτα σημειώσεις για κάθε σελίδα, μετά κάρτες και ερωτήσεις. Συνήθως 1 με 3 λεπτά.";
+function failed(err) {
+  show("start");
+  renderRecent();
+  showError(err instanceof TypeError ? "Δεν ήταν δυνατή η σύνδεση με την εφαρμογή. Τρέχει ακόμα;" : err.message);
+  refreshStatus();
+}
+
+// Ask the server how the job is going, and show the material as soon as it exists.
+function followJob(id, stopClock) {
+  const mine = ++following;
+  const finish = () => {
+    stopClock();
+    forget(JOB_KEY);
+    refreshStatus();
   };
-  render(form.elements.engine.value === "local" ? "local" : "cloud");
+  const poll = async () => {
+    if (mine !== following) return stopClock(); // the user went back to the start
+    let job;
+    try {
+      const response = await fetch(`/api/jobs/${id}`);
+      if (response.status === 404) { // the server was restarted
+        finish();
+        return goHome();
+      }
+      job = await response.json();
+    } catch {
+      return setTimeout(poll, 3000); // keep trying: the work goes on without us
+    }
+    clockStart = Date.now() - job.seconds * 1000; // the server knows, even after a reload
+    elapsed = formatSeconds(job.seconds);
+    if (job.status === "error") {
+      finish();
+      return failed(new Error(job.error));
+    }
+    if (job.status === "done") {
+      finish();
+      if (job.result.engine === "local") results = null; // Gemini gave up halfway: nothing of it stays
+      fillResults(job.result);
+      finishResults(job.result);
+      return saveRecent(job.result);
+    }
+    if (job.partial && job.working !== "local") fillResults(job.partial);
+    else showWorking(job.working);
+    setTimeout(poll, 1000);
+  };
+  poll();
+}
+
+function showWorking(working) {
+  const local = working === "local";
+  $("working-title").textContent = local ? "Το τοπικό μοντέλο γράφει το υλικό" : "Το Gemini διαβάζει τις διαφάνειες";
+  $("working-text").textContent = local
+    ? "Δουλεύει στον υπολογιστή σου, οπότε μπορεί να πάρει μερικά λεπτά. Μπορείς να κλείσεις τη σελίδα και να γυρίσεις."
+    : "Μόλις τελειώσει η ανάγνωση, το υλικό θα εμφανίζεται κομμάτι κομμάτι.";
+}
+
+function formatSeconds(seconds) {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function startClock() {
+  clockStart = Date.now();
   const tick = () => {
-    const seconds = Math.floor((Date.now() - started) / 1000);
-    $("elapsed").textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    elapsed = formatSeconds(Math.floor((Date.now() - clockStart) / 1000));
+    $("elapsed").textContent = elapsed;
+    if (results) renderProgressLine();
   };
   tick();
   const clock = setInterval(tick, 1000);
-  const poll = setInterval(async () => {
-    try {
-      const state = await (await fetch("/api/status")).json();
-      if (state.working) render(state.working);
-    } catch { /* the result or the error will tell */ }
-  }, 2000);
-  return () => {
-    clearInterval(clock);
-    clearInterval(poll);
-  };
+  return () => clearInterval(clock);
 }
 
 // Recent lectures, kept only in this browser
@@ -241,7 +294,10 @@ function renderRecent() {
     el("button", { type: "button", onclick: () => {
       if (pdfUrl) URL.revokeObjectURL(pdfUrl);
       pdfUrl = null;
-      showResults(item.data, true);
+      following++;
+      results = null;
+      fillResults(item.data);
+      finishResults(item.data, true);
     } },
     el("span", {}, item.data.title || "Διάλεξη"),
     el("small", {}, `${item.data.flashcards.length} κάρτες · ${new Date(item.when).toLocaleDateString("el-GR")}`)))));
@@ -249,41 +305,85 @@ function renderRecent() {
 
 function goHome() {
   deckKeys = null;
+  following++;
+  results = null;
+  forget(JOB_KEY);
   renderRecent();
   show("start");
 }
 $("home").addEventListener("click", goHome);
 $("new-lecture").addEventListener("click", goHome);
 
-// Results
+// Results. The tabs exist from the start; each one fills up when its material is ready.
 
-function showResults(data, fromRecent = false) {
-  currentTitle = data.title || "";
-  $("lecture-title").textContent = data.title || "Η διάλεξή σου";
-  const pages = data.pages ? `${data.pages} σελίδες · ` : "";
-  const source = fromRecent ? "από τις πρόσφατες" : data.cached ? "από την cache" : "";
-  $("status").textContent = `${pages}${data.backend}${source ? ` · ${source}` : ""}`;
-  const notice = !fromRecent && data.notice ? `Δούλεψε το τοπικό μοντέλο, γιατί δεν απάντησε το Gemini. ${data.notice}` : "";
-  $("notice").textContent = notice;
-  $("notice").hidden = !notice;
-
-  const tabs = TABS.filter((t) => data[t.key]?.length);
-  $("stats").replaceChildren(...tabs.map((t) => el("div", {}, el("b", {}, String(data[t.key].length)), el("span", {}, t.stat))));
+function startResults() {
+  results = { filled: new Set(), picked: false, data: null };
+  $("notice").hidden = true;
   tabsEl.replaceChildren();
   panelsEl.replaceChildren();
-  tabs.forEach((tab, i) => {
+  TABS.forEach((tab, i) => {
     tabsEl.append(el("button", {
       role: "tab", id: `tab-${tab.key}`, "aria-controls": `panel-${tab.key}`,
       "aria-selected": i === 0 ? "true" : "false", tabindex: i === 0 ? "0" : "-1",
-      onclick: () => select(tab.key),
-    }, tab.label));
+      onclick: () => {
+        results.picked = true;
+        select(tab.key);
+      },
+    }, tab.label, el("span", { class: "tab-pending", "aria-hidden": "true" })));
     const panel = el("div", {
       role: "tabpanel", id: `panel-${tab.key}`, "aria-labelledby": `tab-${tab.key}`, class: "panel",
-    }, tab.render(data[tab.key]));
+    }, el("p", { class: "pending" }, "Γράφεται τώρα…"));
     panel.hidden = i !== 0;
     panelsEl.append(panel);
   });
   show("results");
+}
+
+function fillResults(data) {
+  if (!results) startResults();
+  results.data = data;
+  currentTitle = data.title || "";
+  $("lecture-title").textContent = data.title || "Η διάλεξή σου";
+  for (const tab of TABS) {
+    if (results.filled.has(tab.key) || !data[tab.key]?.length) continue;
+    results.filled.add(tab.key);
+    $(`panel-${tab.key}`).replaceChildren(tab.render(data[tab.key]));
+    $(`tab-${tab.key}`).querySelector(".tab-pending").remove();
+    // Until the user picks a tab, show the first one that has something to study.
+    const first = TABS.find((t) => results.filled.has(t.key));
+    if (!results.picked) select(first.key);
+  }
+  renderStats(data);
+  renderProgressLine();
+}
+
+function renderStats(data) {
+  $("stats").replaceChildren(...TABS.map((t) => el("div", {},
+    el("b", {}, results.filled.has(t.key) ? String(data[t.key].length) : "…"), el("span", {}, t.stat))));
+}
+
+function renderProgressLine() {
+  const pending = TABS.filter((t) => !results.filled.has(t.key)).map((t) => t.label);
+  const pages = results.data?.pages ? `${results.data.pages} σελίδες · ` : "";
+  if (!results.final) $("status").textContent = `${pages}${pending.length ? `Γράφονται ακόμα: ${pending.join(", ")} · ` : ""}${elapsed}`;
+}
+
+function finishResults(data, fromRecent = false) {
+  results.final = true;
+  // Tabs the engine left empty have nothing to offer.
+  for (const tab of TABS) {
+    if (results.filled.has(tab.key)) continue;
+    $(`tab-${tab.key}`).remove();
+    $(`panel-${tab.key}`).remove();
+  }
+  $("stats").replaceChildren(...TABS.filter((t) => results.filled.has(t.key)).map((t) => el("div", {},
+    el("b", {}, String(data[t.key].length)), el("span", {}, t.stat))));
+  const pages = data.pages ? `${data.pages} σελίδες · ` : "";
+  const source = fromRecent ? "από τις πρόσφατες" : data.cached ? "από την cache" : `σε ${elapsed}`;
+  $("status").textContent = `${pages}${data.backend} · ${source}`;
+  const notice = !fromRecent && data.notice ? `Δούλεψε το τοπικό μοντέλο, γιατί δεν απάντησε το Gemini. ${data.notice}` : "";
+  $("notice").textContent = notice;
+  $("notice").hidden = !notice;
 }
 
 function select(key, freshContent) {
@@ -522,3 +622,11 @@ function renderDefinitions(items) {
 
 renderRecent();
 refreshStatus();
+
+// Back on the page while a lecture is still being written: pick it up again.
+const runningJob = load(JOB_KEY);
+if (runningJob) {
+  show("working");
+  showWorking("cloud");
+  followJob(runningJob, startClock());
+}

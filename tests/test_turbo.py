@@ -51,7 +51,7 @@ def test_rate_limit_is_retried_then_succeeds(tiny_pdf, pack_json):
     client = scripted([APIError(429, "RESOURCE_EXHAUSTED retryDelay: '3s'")] * 2, pack_json)
     result = llm_client.generate_study_pack(tiny_pdf, client=client)
     assert result.quiz
-    assert len(client.models.models_used) == 4  # 2 failures + read + write
+    assert len(client.models.models_used) == 7  # 2 failures + read + one write per mode
 
 
 def test_overloaded_server_is_retried(tiny_pdf, pack_json):
@@ -67,6 +67,7 @@ def test_daily_quota_stops_with_clear_message(tiny_pdf, pack_json):
 
 def test_retired_model_falls_back_to_the_next_one(tiny_pdf, pack_json, monkeypatch):
     monkeypatch.setattr(llm_client, "MODEL", "gemini-old")
+    monkeypatch.setattr(llm_client, "NOTES_MODEL", "gemini-old")
     monkeypatch.setattr(llm_client, "FALLBACK_MODELS", ["gemini-new"])
     client = scripted([APIError(404, "models/gemini-old is no longer available")], pack_json)
     llm_client.generate_study_pack(tiny_pdf, client=client)
@@ -75,6 +76,7 @@ def test_retired_model_falls_back_to_the_next_one(tiny_pdf, pack_json, monkeypat
 
 def test_no_model_available_says_which_env_var_to_change(tiny_pdf, pack_json, monkeypatch):
     monkeypatch.setattr(llm_client, "FALLBACK_MODELS", [])
+    monkeypatch.setattr(llm_client, "NOTES_MODEL", llm_client.MODEL)
     client = scripted([APIError(404, "NOT_FOUND")], pack_json)
     with pytest.raises(llm_client.LLMError, match="GEMINI_MODEL"):
         llm_client.generate_study_pack(tiny_pdf, client=client)
@@ -349,7 +351,59 @@ def test_model_too_big_for_memory_says_so(tiny_pdf):
 
 def test_stuck_model_moves_to_the_next_one_without_retrying(tiny_pdf, pack_json, monkeypatch):
     monkeypatch.setattr(llm_client, "MODEL", "gemini-slow")
+    monkeypatch.setattr(llm_client, "NOTES_MODEL", "gemini-slow")
     monkeypatch.setattr(llm_client, "FALLBACK_MODELS", ["gemini-fast"])
     client = scripted([TimeoutError("The read operation timed out")], pack_json)
     llm_client.generate_study_pack(tiny_pdf, client=client)
     assert client.models.models_used[:2] == ["gemini-slow", "gemini-fast"]
+
+
+# Parallel writing
+
+def test_material_is_reported_as_each_mode_finishes(tiny_pdf, pack_json):
+    seen = []
+    llm_client.generate_study_pack(tiny_pdf, client=FakeClient(pack_json), on_progress=seen.append)
+    assert len(seen) == 5  # title right after reading, then one per mode
+    assert seen[0]["title"] and not seen[0]["flashcards"] and not seen[0]["quiz"]
+    assert seen[-1]["flashcards"] and seen[-1]["quiz"] and seen[-1]["summary"] and seen[-1]["definitions"]
+
+
+def test_only_the_mode_with_too_little_is_asked_again(tiny_pdf, pack_json):
+    client = FakeClient(bad_json(definitions=[]))
+    with pytest.raises(llm_client.LLMError, match="definitions"):
+        llm_client.generate_study_pack(tiny_pdf, client=client)
+    schemas = [k["config"].response_schema.__name__ for k in client.models.all_kwargs]
+    assert schemas.count("DefinitionsPart") == 2
+    assert schemas.count("FlashcardsPart") <= 1
+
+
+def test_reading_uses_little_thinking_and_a_model_without_that_setting_still_works(tiny_pdf, pack_json):
+    client = scripted([APIError(400, "thinking_level is not supported by this model")], pack_json)
+    llm_client.generate_study_pack(tiny_pdf, client=client)
+    first, retry, *_ = client.models.models_used
+    assert first == retry
+    read = client.models.fake.all_kwargs[0]["config"]
+    assert read.response_schema is llm_client.LectureNotes and read.thinking_config is None
+
+
+def long_notes(pages):
+    return json.dumps({"title": "Μεγάλη", "pages": [
+        {"page": n, "title": f"Σελίδα {n}", "content": "x", "key_terms": []} for n in range(1, pages + 1)]})
+
+
+def test_long_lecture_gets_flashcards_for_every_part(tiny_pdf, pack_json):
+    client = FakeClient(pack_json, notes=long_notes(30))
+    llm_client.generate_study_pack(tiny_pdf, client=client)
+    calls = [k for k in client.models.all_kwargs if k["config"].response_schema is llm_client.FlashcardsPart]
+    assert len(calls) == 3  # pages 1-12, 13-24, 25-30
+    middle = next(k["contents"][0] for k in calls if '"page": 13' in k["contents"][0])
+    assert '"page": 12' not in middle and '"page": 24' in middle and '"page": 25' not in middle
+
+
+def test_heavy_pdf_goes_only_to_the_reading_step(tiny_pdf, pack_json, monkeypatch):
+    monkeypatch.setattr(llm_client, "WRITE_PDF_LIMIT", 10)
+    client = FakeClient(pack_json)
+    llm_client.generate_study_pack(tiny_pdf, client=client)
+    read, *writes = client.models.all_kwargs
+    assert not isinstance(read["contents"][0], str)
+    assert all(isinstance(part, str) for write in writes for part in write["contents"])

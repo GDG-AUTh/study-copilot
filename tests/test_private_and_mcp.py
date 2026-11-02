@@ -103,13 +103,13 @@ def test_changing_a_prompt_or_model_bypasses_the_cache(tmp_path, fake_client, ti
     import study_cache
 
     study_cache.get_or_create(tiny_pdf, tmp_path, client=fake_client)
-    monkeypatch.setattr(llm_client, "build_prompt", lambda pages=10: "a new, stricter quiz prompt")
+    monkeypatch.setattr(llm_client, "build_prompt", lambda pages=10, modes=None: "a new, stricter quiz prompt")
     _, cached = study_cache.get_or_create(tiny_pdf, tmp_path, client=fake_client)
     assert cached is False
     monkeypatch.setattr(llm_client, "MODEL", "another-model")
     _, cached = study_cache.get_or_create(tiny_pdf, tmp_path, client=fake_client)
     assert cached is False
-    assert fake_client.models.calls == 6  # read + write, three times
+    assert fake_client.models.calls == 15  # read + one write per mode, three times
 
 
 # MCP server

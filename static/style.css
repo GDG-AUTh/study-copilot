@@ -265,3 +265,8 @@ details summary { cursor: pointer; color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Material still being written */
+.pending { color: var(--muted); padding: 48px 0; text-align: center; animation: breathe 1.6s infinite ease-in-out; }
+.tab-pending { display: inline-block; width: 7px; height: 7px; margin-left: 7px; border-radius: 50%; background: var(--marker); vertical-align: 2px; animation: breathe 1.6s infinite ease-in-out; }
+@keyframes breathe { 50% { opacity: 0.35; } }

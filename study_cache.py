@@ -51,13 +51,13 @@ def _path(pdf_bytes: bytes, cache_dir: Path, private: bool) -> Path:
 
 
 def get_or_create(pdf_bytes: bytes, cache_dir: Path, private: bool = False,
-                  client=None, ollama_client=None) -> tuple[dict, bool]:
+                  client=None, ollama_client=None, on_progress=None) -> tuple[dict, bool]:
     """Return (study pack as dict, came_from_cache)."""
     path = _path(pdf_bytes, cache_dir, private)
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8")), True
     pack = llm_client.generate_study_pack(pdf_bytes, client=client, private=private,
-                                          ollama_client=ollama_client)
+                                          ollama_client=ollama_client, on_progress=on_progress)
     payload = pack.model_dump()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -65,14 +65,15 @@ def get_or_create(pdf_bytes: bytes, cache_dir: Path, private: bool = False,
 
 
 def study(pdf_bytes: bytes, cache_dir: Path, engine: str = "auto", state: EngineState | None = None,
-          client=None, ollama_client=None) -> dict:
+          client=None, ollama_client=None, on_progress=None) -> dict:
     """Run the chosen engine. Returns the pack plus cached, engine and notice."""
     state = state or EngineState()
 
     def run(private: bool) -> tuple[dict, bool]:
         state.working = "local" if private else "cloud"
         try:
-            return get_or_create(pdf_bytes, cache_dir, private=private, client=client, ollama_client=ollama_client)
+            return get_or_create(pdf_bytes, cache_dir, private=private, client=client,
+                                 ollama_client=ollama_client, on_progress=on_progress)
         finally:
             state.working = None
 
