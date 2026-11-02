@@ -56,7 +56,7 @@ def test_private_mode_never_calls_gemini(tmp_path, pack_json, tiny_pdf, no_netwo
     response = client.post("/api/study", data={"pdf": (io.BytesIO(tiny_pdf), "l.pdf"), "private": "1"},
                            content_type="multipart/form-data")
     assert response.status_code == 200
-    assert "Gemma" in response.get_json()["backend"]
+    assert llm_client.LOCAL_MODEL in response.get_json()["backend"]
 
 
 def test_private_mode_accepts_a_smaller_pack_from_a_small_model(pack_json, tiny_pdf):

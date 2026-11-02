@@ -4,29 +4,70 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Study Copilot</title>
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='3' y='7' width='26' height='18' rx='3' fill='%23fffdf7' stroke='%231b1f2a' stroke-width='2'/><path d='M3 12h26' stroke='%23c8352b' stroke-width='2'/><path d='M8 18h16' stroke='%232346d5' stroke-width='2'/></svg>">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>Study Copilot</h1>
-    <p>Ανέβασε τις διαφάνειες μιας διάλεξης και πάρε περίληψη, flashcards, quiz και ορισμούς.</p>
+  <header class="topbar">
+    <button class="brand" id="home" type="button" aria-label="Αρχική">
+      <span class="brand-mark" aria-hidden="true"></span>Study Copilot
+    </button>
+    <div class="topbar-right">
+      <span id="engine-chip" class="chip" hidden></span>
+      <button id="theme" class="icon-button" type="button" aria-label="Αλλαγή θέματος">◐</button>
+    </div>
   </header>
 
   <main>
-    <form id="upload-form">
-      <label for="pdf">Διάλεξη σε PDF (έως 20 MB)</label>
-      <input id="pdf" name="pdf" type="file" accept="application/pdf" required>
-      <label class="toggle">
-        <input id="private" name="private" type="checkbox" value="1">
-        Ιδιωτική λειτουργία: Gemma στο laptop σου, το PDF δεν φεύγει από τον υπολογιστή
-      </label>
-      <button type="submit" id="submit">Φτιάξε υλικό μελέτης</button>
-    </form>
+    <section id="start">
+      <div class="hero">
+        <h1>Από τις διαφάνειες στην <mark>εξεταστική</mark>.</h1>
+        <p>Ρίξε μέσα μια διάλεξη σε PDF και πάρε περίληψη, flashcards, quiz και ορισμούς, με τη σελίδα από την οποία βγήκε το καθένα.</p>
+      </div>
 
-    <p id="status" role="status" aria-live="polite"></p>
+      <form id="upload-form">
+        <label id="drop" class="drop" for="pdf">
+          <input id="pdf" name="pdf" type="file" accept="application/pdf">
+          <span class="drop-stack" aria-hidden="true"><i></i><i></i><i></i></span>
+          <strong>Σύρε εδώ το PDF ή πάτα για να το διαλέξεις</strong>
+          <small>Έως 20 MB. Ξεκινά αμέσως μόλις το επιλέξεις.</small>
+        </label>
+
+        <fieldset class="engines">
+          <legend>Ποιο μοντέλο να δουλέψει;</legend>
+          <label><input type="radio" name="engine" value="auto" checked><span><b>Αυτόματα</b><small>Gemini, αλλιώς τοπικά</small></span></label>
+          <label><input type="radio" name="engine" value="cloud"><span><b>Gemini</b><small>Το πιο δυνατό, στο cloud</small></span></label>
+          <label><input type="radio" name="engine" value="local"><span><b>Τοπικά</b><small>Το PDF μένει στον υπολογιστή σου</small></span></label>
+        </fieldset>
+        <p id="engine-hint" class="hint" aria-live="polite"></p>
+      </form>
+
+      <p id="error" class="error-box" role="alert" hidden></p>
+
+      <section id="recent" hidden>
+        <h2>Πρόσφατες διαλέξεις</h2>
+        <ul id="recent-list"></ul>
+      </section>
+    </section>
+
+    <section id="working" hidden aria-live="polite">
+      <div class="deck-loader" aria-hidden="true"><i></i><i></i><i></i></div>
+      <h2 id="working-title"></h2>
+      <p id="working-text" class="hint"></p>
+      <p class="timer"><span id="elapsed">0:00</span></p>
+    </section>
 
     <section id="results" hidden>
-      <h2 id="lecture-title"></h2>
+      <div class="results-head">
+        <div>
+          <h1 id="lecture-title"></h1>
+          <p id="status" class="hint" role="status"></p>
+        </div>
+        <button id="new-lecture" type="button">Νέα διάλεξη</button>
+      </div>
+      <p id="notice" class="notice" hidden></p>
+      <div id="stats" class="stats"></div>
       <div role="tablist" aria-label="Υλικό μελέτης" id="tabs"></div>
       <div id="panels"></div>
     </section>

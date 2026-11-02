@@ -28,16 +28,24 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Literal
 
+from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 
-# Main model and fallbacks. Change them here (or with the env vars), nowhere else.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
-FALLBACK_MODELS = [m.strip() for m in os.environ.get("GEMINI_FALLBACK_MODELS", "gemini-2.5-flash").split(",")
-                   if m.strip()]
+# Before the settings below are read. .env wins over an old key in the shell.
+load_dotenv(Path(__file__).parent / ".env", override=True)
 
-# Local model for private mode. gemma3:1b is small (~0.8 GB) and runs on any laptop;
-# with a good connection and 8+ GB RAM, try gemma4:e2b (~7 GB) for better answers.
-LOCAL_MODEL = os.environ.get("LOCAL_MODEL", "gemma3:1b")
+# Main model and fallbacks. Change them here (or with the env vars), nowhere else.
+# Vertex AI has no "latest" aliases, so it needs real model names.
+_VERTEX = bool(os.environ.get("GOOGLE_CLOUD_PROJECT"))
+# Pro writes the deepest cards (about 2.5 minutes per lecture); 3.5 Flash is close and takes 1 minute.
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview" if _VERTEX else "gemini-flash-latest")
+_FALLBACKS = "gemini-3.5-flash" if _VERTEX else "gemini-2.5-flash"
+FALLBACK_MODELS = [m.strip() for m in os.environ.get("GEMINI_FALLBACK_MODELS", _FALLBACKS).split(",") if m.strip()]
+
+# Local model for private mode and for when Gemini is unavailable.
+# gemma4:e2b-it-qat (~4.3 GB) fits a Mac with 8 GB RAM. Plain gemma4:e2b does not: on a Mac
+# it is a 7.5 GB build. With 16+ GB RAM try gemma4:e4b.
+LOCAL_MODEL = os.environ.get("LOCAL_MODEL", "gemma4:e2b-it-qat")
 
 # Small local models have a limited context: send at most this many pages.
 MAX_LOCAL_PAGES = int(os.environ.get("MAX_LOCAL_PAGES", 30))
@@ -49,6 +57,9 @@ INLINE_PDF_LIMIT = 14 * 1024 * 1024
 # How many times to retry a temporary Gemini error (rate limit, overloaded server).
 MAX_RETRIES = int(os.environ.get("GEMINI_MAX_RETRIES", 3))
 MAX_RETRY_WAIT = 30  # seconds
+
+# Give up on one Gemini call after this long, so a stuck request can never hang the app.
+GEMINI_TIMEOUT = int(os.environ.get("GEMINI_TIMEOUT", 240))  # seconds
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
@@ -136,6 +147,13 @@ class LLMError(Exception):
     """An error with a message that is safe to show to the user (in Greek)."""
 
 
+class GeminiUnavailable(LLMError):
+    """Gemini cannot answer right now (no key, no credits, limits, offline).
+
+    Nothing is wrong with the lecture, so the app can use the local model instead.
+    """
+
+
 class _Retryable(Exception):
     """A temporary problem: wait and try again (or try the next model)."""
 
@@ -214,13 +232,27 @@ def generate_study_pack(pdf_bytes: bytes, client=None, private: bool = False, ol
 
 # Gemini
 
+def gemini_configured() -> bool:
+    return bool(os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GEMINI_API_KEY"))
+
+
 def _default_client():
+    """Vertex AI when a Cloud project is set (that route can use trial credits), else an API key."""
+    from google import genai
+    from google.genai import types
+
+    http = types.HttpOptions(timeout=GEMINI_TIMEOUT * 1000)
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    if project:
+        location = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
+        try:
+            return genai.Client(vertexai=True, project=project, location=location, http_options=http)
+        except Exception as exc:
+            raise _classify(exc) from exc
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
-        raise LLMError("Λείπει το GEMINI_API_KEY. Αντίγραψε το .env.example σε .env και βάλε το κλειδί σου.")
-    from google import genai
-
-    return genai.Client(api_key=key)
+        raise GeminiUnavailable("Λείπει το GEMINI_API_KEY. Αντίγραψε το .env.example σε .env και βάλε το κλειδί σου.")
+    return genai.Client(api_key=key, http_options=http)
 
 
 def _generate_gemini(pdf_bytes: bytes, client=None) -> StudyResult:
@@ -263,7 +295,8 @@ def _generate_gemini(pdf_bytes: bytes, client=None) -> StudyResult:
 
 def _pdf_part(client, pdf_bytes: bytes, types):
     """Small PDFs go inline; large ones through the Files API. Returns (part, uploaded_file)."""
-    if len(pdf_bytes) <= INLINE_PDF_LIMIT:
+    # Vertex AI has no Files API; it takes the PDF inline.
+    if len(pdf_bytes) <= INLINE_PDF_LIMIT or getattr(client, "vertexai", False) is True:
         return types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"), None
     try:
         uploaded = client.files.upload(file=io.BytesIO(pdf_bytes), config={"mime_type": "application/pdf"})
@@ -277,7 +310,7 @@ def _pdf_part(client, pdf_bytes: bytes, types):
         problem = _classify(exc)
         if isinstance(problem, LLMError):
             raise problem from exc
-        raise LLMError("Δεν ήταν δυνατό να ανέβει το PDF στο Gemini. Δοκίμασε ξανά.") from exc
+        raise GeminiUnavailable("Δεν ήταν δυνατό να ανέβει το PDF στο Gemini. Δοκίμασε ξανά.") from exc
     if "FAILED" in str(getattr(uploaded, "state", "")):
         raise LLMError("Το Gemini δεν μπόρεσε να επεξεργαστεί αυτό το PDF.")
     return uploaded, uploaded
@@ -302,18 +335,18 @@ def _call_gemini(client, contents, schema) -> str:
                 if isinstance(problem, LLMError):
                     raise problem from exc
                 last = problem
-                if isinstance(problem, _ModelUnavailable):
-                    break  # next model
+                if isinstance(problem, _ModelUnavailable) or "timed out" in str(problem).lower():
+                    break  # next model: asking a stuck model again only wastes minutes
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(min(problem.wait or 2 ** (attempt + 1), MAX_RETRY_WAIT))
     if isinstance(last, _ModelUnavailable):
-        raise LLMError(f"Το μοντέλο {MODEL} δεν είναι διαθέσιμο για το κλειδί σου. "
+        raise GeminiUnavailable(f"Το μοντέλο {MODEL} δεν είναι διαθέσιμο για το κλειδί σου. "
                        "Βάλε άλλο μοντέλο στο GEMINI_MODEL του .env (π.χ. gemini-2.5-flash).")
     if last is not None and "429" in str(last):
-        raise LLMError("Ξεπεράστηκε το όριο αιτημάτων ανά λεπτό του Gemini. Περίμενε ένα λεπτό και ξαναδοκίμασε.")
+        raise GeminiUnavailable("Ξεπεράστηκε το όριο αιτημάτων ανά λεπτό του Gemini. Περίμενε ένα λεπτό και ξαναδοκίμασε.")
     if last is not None and "empty" in str(last):
-        raise LLMError("Το Gemini δεν επέστρεψε απάντηση (ίσως μπλόκαρε το περιεχόμενο). Δοκίμασε ξανά.")
-    raise LLMError("Το Gemini είναι προσωρινά υπερφορτωμένο. Δοκίμασε ξανά σε λίγο.")
+        raise GeminiUnavailable("Το Gemini δεν επέστρεψε απάντηση (ίσως μπλόκαρε το περιεχόμενο). Δοκίμασε ξανά.")
+    raise GeminiUnavailable("Το Gemini είναι προσωρινά υπερφορτωμένο. Δοκίμασε ξανά σε λίγο.")
 
 
 def _response_text(response) -> str:
@@ -332,16 +365,21 @@ def _classify(exc: Exception) -> Exception:
         match = re.match(r"\s*(\d{3})\b", text)
         code = int(match.group(1)) if match else None
 
+    if "default credentials" in low:
+        return GeminiUnavailable("Δεν έχεις συνδεθεί στο Google Cloud. Τρέξε: gcloud auth application-default login")
+    if "aiplatform.googleapis.com" in low and code == 403:
+        return GeminiUnavailable("Το Vertex AI δεν είναι διαθέσιμο στο project σου. Έλεγξε το GOOGLE_CLOUD_PROJECT "
+                                 "και τρέξε: gcloud services enable aiplatform.googleapis.com")
     if code == 402 or "prepayment" in low or "credits are depleted" in low:
-        return LLMError("Τελείωσαν τα credits του Gemini API στο project σου. Πρόσθεσε credits στο "
+        return GeminiUnavailable("Τελείωσαν τα credits του Gemini API στο project σου. Πρόσθεσε credits στο "
                         "AI Studio (https://ai.studio/projects) ή χρησιμοποίησε άλλο κλειδί.")
     if code in (401, 403) or "api key" in low or "api_key" in low or "permission_denied" in low:
-        return LLMError("Το Gemini απέρριψε το κλειδί. Έλεγξε το GEMINI_API_KEY στο .env.")
+        return GeminiUnavailable("Το Gemini απέρριψε το κλειδί. Έλεγξε το GEMINI_API_KEY στο .env.")
     if code == 404 or "not_found" in low or "no longer available" in low:
         return _ModelUnavailable(text)
     if code == 429 or "resource_exhausted" in low:
         if "perday" in low.replace(" ", "") or "per day" in low or "daily" in low:
-            return LLMError("Εξαντλήθηκε το ημερήσιο όριο του δωρεάν Gemini. Δοκίμασε αύριο ή με άλλο κλειδί.")
+            return GeminiUnavailable("Εξαντλήθηκε το ημερήσιο όριο του δωρεάν Gemini. Δοκίμασε αύριο ή με άλλο κλειδί.")
         return _Retryable(text, wait=_retry_delay(exc))
     if code in (500, 502, 503, 504) or "unavailable" in low or "overloaded" in low or "deadline" in low:
         return _Retryable(text)
@@ -353,7 +391,7 @@ def _classify(exc: Exception) -> Exception:
         return _Retryable(text)
     if code is None and ("connect" in low or "timed out" in low or "timeout" in low):
         return _Retryable(text)
-    return LLMError("Δεν ήταν δυνατή η επικοινωνία με το Gemini. Δοκίμασε ξανά.")
+    return GeminiUnavailable("Δεν ήταν δυνατή η επικοινωνία με το Gemini. Δοκίμασε ξανά.")
 
 
 def _retry_delay(exc: Exception) -> float:
@@ -519,6 +557,16 @@ def extract_text(pdf_bytes: bytes) -> str:
     return text
 
 
+def local_status(ollama_client=None) -> dict:
+    """Is the local model ready? Never raises: the UI shows the answer."""
+    try:
+        listed = (ollama_client or _default_ollama()).list()
+    except Exception:
+        return {"model": LOCAL_MODEL, "state": "not_running"}
+    names = [m.model for m in listed.models]
+    return {"model": LOCAL_MODEL, "state": "ready" if LOCAL_MODEL in names else "not_installed"}
+
+
 def _default_ollama():
     import ollama
 
@@ -535,9 +583,13 @@ def _generate_local(pdf_bytes: bytes, ollama_client=None) -> StudyResult:
             messages=[{"role": "user", "content": f"{build_prompt(len(texts))}\n\n# Lecture\n\n{text}"}],
             format=StudyPack.model_json_schema(),
             options={"temperature": 0.3, "num_ctx": 16384},
+            keep_alive="2m",  # give the RAM back soon after: a laptop needs it
         )
     except Exception as exc:
         message = str(exc).lower()
+        if "requires" in message and "available" in message:
+            raise LLMError(f"Το μοντέλο {LOCAL_MODEL} δεν χωρά στη μνήμη αυτή τη στιγμή. "
+                           "Κλείσε άλλες εφαρμογές ή βάλε μικρότερο στο LOCAL_MODEL του .env.") from exc
         if "not found" in message or "pull" in message:
             raise LLMError(f"Το μοντέλο {LOCAL_MODEL} δεν βρέθηκε. Τρέξε: ollama pull {LOCAL_MODEL}") from exc
         if "connect" in message or "refused" in message or isinstance(exc, ConnectionError):

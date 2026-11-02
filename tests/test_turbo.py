@@ -1,4 +1,5 @@
 """The turbo pipeline: Gemini error handling, retries, fallback models and cleaning the answer."""
+import io
 import json
 from types import SimpleNamespace
 
@@ -181,3 +182,174 @@ def test_counts_scale_with_the_length_of_the_lecture():
 def test_notes_prompt_asks_for_every_page():
     prompt = llm_client.build_notes_prompt()
     assert "EVERY page" in prompt and "{{n_pages}}" in prompt
+
+
+# Choosing the engine: a problem with the key must not stop the student
+
+class FakeOllama:
+    def __init__(self, content=None, error=None, models=("gemma4:e2b",)):
+        self.content, self.error, self.calls, self.models = content, error, 0, models
+
+    def chat(self, **kwargs):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return SimpleNamespace(message=SimpleNamespace(content=self.content))
+
+    def list(self):
+        if self.error:
+            raise self.error
+        return SimpleNamespace(models=[SimpleNamespace(model=m) for m in self.models])
+
+
+def post_pdf(http, pdf, **form):
+    return http.post("/api/study", data={"pdf": (io.BytesIO(pdf), "l.pdf"), **form},
+                     content_type="multipart/form-data")
+
+
+def make(tmp_path, gemini, ollama):
+    from app import create_app
+
+    return create_app(client=gemini, ollama_client=ollama, cache_dir=tmp_path).test_client()
+
+
+NO_CREDITS = APIError(402, "RESOURCE_EXHAUSTED. Your prepayment credits are depleted.")
+
+
+def test_no_credits_falls_back_to_local_without_an_error(tmp_path, tiny_pdf, pack_json):
+    ollama = FakeOllama(pack_json)
+    response = post_pdf(make(tmp_path, scripted([NO_CREDITS], pack_json), ollama), tiny_pdf)
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["engine"] == "local" and data["flashcards"]
+    assert "credits" in data["notice"]
+    assert ollama.calls == 1
+
+
+def test_after_a_failure_gemini_is_not_called_again_for_a_while(tmp_path, tiny_pdf, pack_json):
+    gemini = scripted([NO_CREDITS], pack_json)
+    http = make(tmp_path, gemini, FakeOllama(pack_json))
+    post_pdf(http, tiny_pdf)
+    data = post_pdf(http, tiny_pdf + b"\n%other").get_json()
+    assert data["engine"] == "local" and "credits" in data["notice"]
+    assert len(gemini.models.models_used) == 1
+
+
+def test_choosing_gemini_always_tries_it_and_recovers(tmp_path, tiny_pdf, pack_json):
+    gemini = scripted([NO_CREDITS], pack_json)
+    http = make(tmp_path, gemini, FakeOllama(pack_json))
+    post_pdf(http, tiny_pdf)
+    data = post_pdf(http, tiny_pdf, engine="cloud").get_json()
+    assert data["engine"] == "cloud" and data["notice"] == ""
+    assert http.get("/api/status").get_json()["gemini"]["down"] is False
+
+
+def test_choosing_gemini_shows_its_error_and_does_not_use_local(tmp_path, tiny_pdf, pack_json):
+    ollama = FakeOllama(pack_json)
+    response = post_pdf(make(tmp_path, scripted([NO_CREDITS], pack_json), ollama), tiny_pdf, engine="cloud")
+    assert response.status_code == 502 and "credits" in response.get_json()["error"]
+    assert ollama.calls == 0
+
+
+def test_local_engine_never_touches_gemini(tmp_path, tiny_pdf, pack_json):
+    gemini = scripted([], pack_json)
+    data = post_pdf(make(tmp_path, gemini, FakeOllama(pack_json)), tiny_pdf, engine="local").get_json()
+    assert data["engine"] == "local" and data["notice"] == ""
+    assert gemini.models.models_used == []
+
+
+def test_both_engines_down_explains_both(tmp_path, tiny_pdf, pack_json):
+    ollama = FakeOllama(error=ConnectionError("Failed to connect to Ollama"))
+    response = post_pdf(make(tmp_path, scripted([NO_CREDITS], pack_json), ollama), tiny_pdf)
+    assert response.status_code == 502
+    message = response.get_json()["error"]
+    assert "credits" in message and "Ollama" in message
+
+
+def test_broken_lecture_answer_does_not_trigger_the_fallback(tmp_path, tiny_pdf):
+    ollama = FakeOllama("{}")
+    response = post_pdf(make(tmp_path, FakeClient("not json"), ollama), tiny_pdf)
+    assert response.status_code == 502
+    assert ollama.calls == 0
+
+
+def test_unknown_engine_is_rejected(tmp_path, tiny_pdf, pack_json):
+    http = make(tmp_path, FakeClient(pack_json), FakeOllama(pack_json))
+    assert post_pdf(http, tiny_pdf, engine="magic").status_code == 400
+
+
+@pytest.mark.parametrize("ollama, state", [
+    (FakeOllama(models=("gemma4:e2b",)), "ready"),
+    (FakeOllama(models=("gemma3:1b",)), "not_installed"),
+    (FakeOllama(error=ConnectionError("refused")), "not_running"),
+])
+def test_status_reports_the_local_model(tmp_path, pack_json, ollama, state, monkeypatch):
+    monkeypatch.setattr(llm_client, "LOCAL_MODEL", "gemma4:e2b")
+    status = make(tmp_path, FakeClient(pack_json), ollama).get("/api/status").get_json()
+    assert status["local"] == {"model": "gemma4:e2b", "state": state}
+    assert status["gemini"]["has_key"] is True
+
+
+# Vertex AI: the route that can use Google Cloud trial credits
+
+def fake_genai(monkeypatch, error=None):
+    from google import genai
+
+    seen = {}
+
+    def build(**kwargs):
+        if error:
+            raise error
+        seen.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(genai, "Client", build)
+    return seen
+
+
+def test_cloud_project_uses_vertex_and_not_the_key(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
+    monkeypatch.setenv("GEMINI_API_KEY", "old-key")
+    monkeypatch.delenv("GOOGLE_CLOUD_LOCATION", raising=False)
+    seen = fake_genai(monkeypatch)
+    llm_client._default_client()
+    assert (seen["vertexai"], seen["project"], seen["location"]) == (True, "my-project", "global")
+    assert "api_key" not in seen
+    assert seen["http_options"].timeout == llm_client.GEMINI_TIMEOUT * 1000
+
+
+def test_without_a_project_the_key_is_used(monkeypatch):
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "a-key")
+    seen = fake_genai(monkeypatch)
+    llm_client._default_client()
+    assert seen["api_key"] == "a-key" and "vertexai" not in seen
+
+
+def test_not_signed_in_to_google_cloud_says_what_to_run(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-project")
+    fake_genai(monkeypatch, error=RuntimeError("Your default credentials were not found."))
+    with pytest.raises(llm_client.GeminiUnavailable, match="gcloud auth application-default login"):
+        llm_client._default_client()
+
+
+def test_vertex_sends_a_large_pdf_inline(tiny_pdf, pack_json, monkeypatch):
+    monkeypatch.setattr(llm_client, "INLINE_PDF_LIMIT", 10)
+    client = FakeClient(pack_json)
+    client.vertexai = True
+    llm_client.generate_study_pack(tiny_pdf, client=client)
+    assert client.models.all_kwargs[0]["contents"][0].inline_data.data == tiny_pdf
+
+
+def test_model_too_big_for_memory_says_so(tiny_pdf):
+    error = RuntimeError("model requires 6.9 GiB but only 4.8 GiB are available")
+    with pytest.raises(llm_client.LLMError, match="μνήμη"):
+        llm_client.generate_study_pack(tiny_pdf, private=True, ollama_client=FakeOllama(error=error))
+
+
+def test_stuck_model_moves_to_the_next_one_without_retrying(tiny_pdf, pack_json, monkeypatch):
+    monkeypatch.setattr(llm_client, "MODEL", "gemini-slow")
+    monkeypatch.setattr(llm_client, "FALLBACK_MODELS", ["gemini-fast"])
+    client = scripted([TimeoutError("The read operation timed out")], pack_json)
+    llm_client.generate_study_pack(tiny_pdf, client=client)
+    assert client.models.models_used[:2] == ["gemini-slow", "gemini-fast"]

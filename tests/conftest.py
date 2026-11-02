@@ -39,6 +39,12 @@ class FakeClient:
 
 
 @pytest.fixture(autouse=True)
+def no_real_settings(monkeypatch):
+    """The developer's own .env must not change what the tests do."""
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def no_sleep(monkeypatch):
     """Retries wait between attempts; tests should not."""
     import llm_client

@@ -31,6 +31,22 @@
 - Εξαγωγή των flashcards για Anki.
 - Quiz με άμεση διόρθωση σε κάθε ερώτηση.
 
+## Ποιο μοντέλο δουλεύει
+
+Η σελίδα έχει τρεις επιλογές: **Αυτόματα** (Gemini, και αν δεν απαντήσει το τοπικό μοντέλο), **Gemini** και **Τοπικά**. Το PDF δεν στέλνεται ποτέ στο cloud όταν έχεις διαλέξει «Τοπικά».
+
+## Gemini με τα credits του Google Cloud
+
+Τα $300 του Free Trial [δεν πληρώνουν κλειδιά του AI Studio](https://docs.cloud.google.com/free/docs/free-cloud-features.md.txt), οπότε η εφαρμογή χρησιμοποιεί το Vertex AI όταν υπάρχει project στο `.env`:
+
+```bash
+gcloud auth application-default login
+gcloud services enable aiplatform.googleapis.com
+echo "GOOGLE_CLOUD_PROJECT=το-project-id" >> .env
+```
+
+Κύριο μοντέλο είναι το `gemini-3.1-pro-preview` και εφεδρικό το `gemini-3.5-flash`. Άλλαξέ τα με `GEMINI_MODEL` και `GEMINI_FALLBACK_MODELS`.
+
 ## Τρέξιμο
 
 ```bash

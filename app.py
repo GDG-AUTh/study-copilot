@@ -10,7 +10,7 @@ from flask import Flask, jsonify, request, send_from_directory
 import llm_client
 import study_cache
 
-load_dotenv()
+load_dotenv(override=True)  # .env wins over an old key in the shell
 
 MAX_MB = 20
 
@@ -20,6 +20,7 @@ def create_app(client=None, cache_dir: str | Path | None = None, ollama_client=N
     app = Flask(__name__, static_folder="static", static_url_path="")
     app.config["MAX_CONTENT_LENGTH"] = MAX_MB * 1024 * 1024
     cache = Path(cache_dir or os.environ.get("CACHE_DIR", ".cache"))
+    state = study_cache.EngineState()
 
     def error(message: str, status: int):
         return jsonify({"error": message}), status
@@ -37,14 +38,29 @@ def create_app(client=None, cache_dir: str | Path | None = None, ollama_client=N
         if not data.startswith(b"%PDF"):
             return error("Το αρχείο δεν είναι PDF.", 400)
 
-        private = request.form.get("private") in ("1", "on", "true")
+        engine = request.form.get("engine", "auto")
+        if request.form.get("private") in ("1", "on", "true"):
+            engine = "local"
+        if engine not in ("auto", "cloud", "local"):
+            return error("Άγνωστη επιλογή μοντέλου.", 400)
         try:
-            payload, cached = study_cache.get_or_create(
-                data, cache, private=private, client=client, ollama_client=ollama_client)
+            result = study_cache.study(data, cache, engine=engine, state=state,
+                                       client=client, ollama_client=ollama_client)
         except llm_client.LLMError as exc:
             return error(str(exc), 502)
-        backend = f"Gemma ({llm_client.LOCAL_MODEL}, τοπικά)" if private else f"Gemini ({llm_client.MODEL})"
-        return jsonify(payload | {"cached": cached, "backend": backend})
+        local = result["engine"] == "local"
+        backend = f"{llm_client.LOCAL_MODEL}, τοπικά" if local else f"Gemini ({llm_client.MODEL})"
+        return jsonify(result | {"backend": backend})
+
+    @app.get("/api/status")
+    def status():
+        """What the UI shows about the engines. Makes no paid call."""
+        has_key = client is not None or llm_client.gemini_configured()
+        return jsonify({
+            "gemini": {"has_key": has_key, "down": state.gemini_down(), "problem": state.gemini_problem},
+            "local": llm_client.local_status(ollama_client),
+            "working": state.working,
+        })
 
     @app.errorhandler(413)
     def too_large(_):

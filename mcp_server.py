@@ -20,8 +20,9 @@ import llm_client
 import study_cache
 
 ROOT = Path(__file__).resolve().parent
-load_dotenv(ROOT / ".env")  # read .env next to this file, whatever the working folder
+load_dotenv(ROOT / ".env", override=True)  # .env next to this file wins over an old key in the shell
 CACHE_DIR = ROOT / ".cache"
+STATE = study_cache.EngineState()
 
 mcp = FastMCP("study-copilot")
 
@@ -33,10 +34,9 @@ def _pack(pdf_path: str, private: bool) -> dict:
     if not path.is_file():
         raise ValueError(f"PDF not found: {path}. Pass an absolute path to a lecture PDF.")
     try:
-        pack, _ = study_cache.get_or_create(path.read_bytes(), CACHE_DIR, private=private)
+        return study_cache.study(path.read_bytes(), CACHE_DIR, engine="local" if private else "auto", state=STATE)
     except llm_client.LLMError as exc:
         raise ValueError(str(exc)) from exc
-    return pack
 
 
 @mcp.tool()

@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None, client=None) -> int:
     parser.add_argument("--private", action="store_true", help="use local Gemma through Ollama")
     args = parser.parse_args(argv)
 
-    load_dotenv()
+    load_dotenv(override=True)  # .env wins over an old key in the shell
     try:
         pack = llm_client.generate_study_pack(args.pdf.read_bytes(), client=client, private=args.private)
     except (OSError, llm_client.LLMError) as exc:

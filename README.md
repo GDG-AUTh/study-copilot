@@ -46,10 +46,10 @@ python cli.py sample_lectures/lecture2.pdf out/lecture2.json   # υλικό σε
 ### Ιδιωτική λειτουργία (Gemma, χωρίς internet)
 
 ```bash
-ollama pull gemma3:1b       # μία φορά, περίπου 0,8 GB
-python app.py               # τσέκαρε «Ιδιωτική λειτουργία» στη σελίδα
+ollama pull gemma4:e2b-it-qat   # μία φορά, περίπου 4,3 GB
+python app.py                   # διάλεξε «Τοπικά» στη σελίδα
 ```
-Το PDF δεν φεύγει από τον υπολογιστή σου. Για καλύτερες απαντήσεις, με καλή σύνδεση και 8 GB RAM ή περισσότερο: `ollama pull gemma4:e2b` (περίπου 7 GB) και `LOCAL_MODEL=gemma4:e2b` στο `.env`.
+Το PDF δεν φεύγει από τον υπολογιστή σου. Με 16 GB RAM ή περισσότερο μπορείς να βάλεις μεγαλύτερο μοντέλο: `ollama pull gemma4:e4b` και `LOCAL_MODEL=gemma4:e4b` στο `.env`.
 
 ### MCP server (το app ως εργαλείο για agents)
 
