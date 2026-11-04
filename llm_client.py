@@ -57,6 +57,9 @@ FALLBACK_MODELS = [m.strip() for m in os.environ.get("GEMINI_FALLBACK_MODELS", _
 # it is a 7.5 GB build. With 16+ GB RAM try gemma4:e4b.
 LOCAL_MODEL = os.environ.get("LOCAL_MODEL", "gemma4:e2b-it-qat")
 
+# Cloud Run sets K_SERVICE. There is no Ollama there, so the local model is not an option.
+ON_CLOUD = bool(os.environ.get("K_SERVICE"))
+
 # Small local models have a limited context: send at most this many pages.
 MAX_LOCAL_PAGES = int(os.environ.get("MAX_LOCAL_PAGES", 30))
 
@@ -453,9 +456,12 @@ def _classify(exc: Exception) -> Exception:
 
     if "default credentials" in low:
         return GeminiUnavailable("Δεν έχεις συνδεθεί στο Google Cloud. Τρέξε: gcloud auth application-default login")
-    if "aiplatform.googleapis.com" in low and code == 403:
+    if "aiplatform.googleapis.com" in low and code == 403 and "permission" not in low.replace("permission_denied", ""):
         return GeminiUnavailable("Το Vertex AI δεν είναι διαθέσιμο στο project σου. Έλεγξε το GOOGLE_CLOUD_PROJECT "
                                  "και τρέξε: gcloud services enable aiplatform.googleapis.com")
+    if "aiplatform" in low and code == 403:
+        return GeminiUnavailable("Ο λογαριασμός με τον οποίο τρέχει η εφαρμογή δεν έχει άδεια για το Vertex AI. "
+                                 "Χρειάζεται τον ρόλο Vertex AI User (roles/aiplatform.user).")
     if code == 402 or "prepayment" in low or "credits are depleted" in low:
         return GeminiUnavailable("Τελείωσαν τα credits του Gemini API στο project σου. Πρόσθεσε credits στο "
                         "AI Studio (https://ai.studio/projects) ή χρησιμοποίησε άλλο κλειδί.")
@@ -645,6 +651,8 @@ def extract_text(pdf_bytes: bytes) -> str:
 
 def local_status(ollama_client=None) -> dict:
     """Is the local model ready? Never raises: the UI shows the answer."""
+    if ON_CLOUD:
+        return {"model": LOCAL_MODEL, "state": "unavailable"}
     try:
         listed = (ollama_client or _default_ollama()).list()
     except Exception:

@@ -15,7 +15,8 @@ import study_cache
 
 load_dotenv(override=True)  # .env wins over an old key in the shell
 
-MAX_MB = 50
+# Cloud Run refuses requests above 32 MB.
+MAX_MB = 30 if llm_client.ON_CLOUD else 50
 MAX_JOBS = 20  # finished jobs are kept in memory, so the page can come back for them
 
 
@@ -112,6 +113,7 @@ def create_app(client=None, cache_dir: str | Path | None = None, ollama_client=N
             "gemini": {"has_key": has_key, "down": state.gemini_down(), "problem": state.gemini_problem},
             "local": llm_client.local_status(ollama_client),
             "working": state.working,
+            "max_mb": MAX_MB,
         })
 
     @app.errorhandler(413)

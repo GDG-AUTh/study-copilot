@@ -81,6 +81,8 @@ def study(pdf_bytes: bytes, cache_dir: Path, engine: str = "auto", state: Engine
         return payload | {"cached": cached, "engine": used, "notice": notice}
 
     if engine == "local":
+        if llm_client.ON_CLOUD:
+            raise llm_client.LLMError("Το τοπικό μοντέλο δουλεύει μόνο όταν τρέχεις την εφαρμογή στον υπολογιστή σου.")
         return done(*run(True), "local")
 
     has_cloud_answer = _path(pdf_bytes, cache_dir, False).exists()
@@ -92,10 +94,12 @@ def study(pdf_bytes: bytes, cache_dir: Path, engine: str = "auto", state: Engine
             return done(payload, cached, "cloud")
         except llm_client.GeminiUnavailable as exc:
             state.mark_gemini_down(str(exc))
-            if engine == "cloud":
+            if engine == "cloud" or llm_client.ON_CLOUD:
                 raise
 
     problem = state.gemini_problem
+    if llm_client.ON_CLOUD:  # Gemini was skipped because it failed a moment ago, and nothing else is here
+        raise llm_client.GeminiUnavailable(problem)
     try:
         payload, cached = run(True)
     except llm_client.LLMError as exc:

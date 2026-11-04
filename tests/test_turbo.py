@@ -407,3 +407,32 @@ def test_heavy_pdf_goes_only_to_the_reading_step(tiny_pdf, pack_json, monkeypatc
     read, *writes = client.models.all_kwargs
     assert not isinstance(read["contents"][0], str)
     assert all(isinstance(part, str) for write in writes for part in write["contents"])
+
+
+# Online (Cloud Run) there is no Ollama
+
+def test_online_a_gemini_problem_never_mentions_ollama(tmp_path, tiny_pdf, pack_json, monkeypatch):
+    monkeypatch.setattr(llm_client, "ON_CLOUD", True)
+    ollama = FakeOllama(pack_json)
+    http = make(tmp_path, scripted([NO_CREDITS, NO_CREDITS], pack_json), ollama)
+    for _ in range(2):  # the second time Gemini is skipped because it just failed
+        response = post_pdf(http, tiny_pdf)
+        assert response.status_code == 502
+        message = response.get_json()["error"]
+        assert "credits" in message and "Ollama" not in message and "τοπικό" not in message
+    assert ollama.calls == 0
+
+
+def test_online_the_local_engine_is_not_offered(tmp_path, tiny_pdf, pack_json, monkeypatch):
+    monkeypatch.setattr(llm_client, "ON_CLOUD", True)
+    ollama = FakeOllama(pack_json)
+    http = make(tmp_path, FakeClient(pack_json), ollama)
+    assert http.get("/api/status").get_json()["local"]["state"] == "unavailable"
+    assert post_pdf(http, tiny_pdf, engine="local").status_code == 502
+    assert ollama.calls == 0
+
+
+def test_missing_vertex_role_says_which_role(tiny_pdf, pack_json):
+    error = APIError(403, "PERMISSION_DENIED. Permission 'aiplatform.endpoints.predict' denied on resource")
+    with pytest.raises(llm_client.GeminiUnavailable, match="roles/aiplatform.user"):
+        llm_client.generate_study_pack(tiny_pdf, client=scripted([error], pack_json))

@@ -7,7 +7,6 @@ const fileInput = $("pdf");
 const tabsEl = $("tabs");
 const panelsEl = $("panels");
 
-const MAX_MB = 50;
 const RECENT_KEY = "study-copilot-recent";
 const THEME_KEY = "study-copilot-theme";
 const JOB_KEY = "study-copilot-job";
@@ -95,6 +94,9 @@ async function refreshStatus() {
   } catch {
     return;
   }
+  $("max-mb").textContent = status.max_mb;
+  // Online there is only Gemini, so there is nothing to choose.
+  $("engines").hidden = status.local.state === "unavailable";
   renderChip();
   renderEngineHint();
 }
@@ -104,6 +106,12 @@ function renderChip() {
   const { gemini, local } = status;
   const geminiOk = gemini.has_key && !gemini.down;
   const localOk = local.state === "ready";
+  if (local.state === "unavailable") {
+    chip.hidden = geminiOk;
+    chip.className = "chip bad";
+    chip.textContent = "Το Gemini δεν είναι διαθέσιμο";
+    return;
+  }
   chip.hidden = false;
   chip.className = `chip ${geminiOk ? "ok" : localOk ? "warn" : "bad"}`;
   // We only learn whether Gemini has credits by using it, so this never promises it works.
@@ -118,6 +126,10 @@ function renderEngineHint() {
   const { gemini, local } = status;
   const code = (text) => el("code", {}, text);
   hint.replaceChildren();
+  if (local.state === "unavailable") {
+    if (gemini.problem) hint.append(gemini.problem);
+    return;
+  }
   const localProblem = () => {
     if (local.state === "not_installed") hint.append("Το τοπικό μοντέλο δεν έχει εγκατασταθεί. Τρέξε ", code(`ollama pull ${local.model}`));
     else if (local.state === "not_running") hint.append("Δεν τρέχει το Ollama. Άνοιξε την εφαρμογή Ollama ή τρέξε ", code("ollama serve"));
@@ -172,8 +184,9 @@ async function generate(file) {
   if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
     return showError("Το αρχείο δεν είναι PDF.");
   }
-  if (file.size > MAX_MB * 1024 * 1024) {
-    return showError(`Το αρχείο είναι μεγαλύτερο από ${MAX_MB} MB.`);
+  const maxMb = status?.max_mb || 50;
+  if (file.size > maxMb * 1024 * 1024) {
+    return showError(`Το αρχείο είναι μεγαλύτερο από ${maxMb} MB.`);
   }
 
   const body = new FormData();
