@@ -61,6 +61,15 @@ echo "GOOGLE_CLOUD_PROJECT=το-project-id" >> .env
 
 Κύριο μοντέλο είναι το `gemini-3.1-pro-preview` και εφεδρικό το `gemini-3.5-flash`. Άλλαξέ τα με `GEMINI_MODEL` και `GEMINI_FALLBACK_MODELS`.
 
+## Online στο Cloud Run
+
+```bash
+gcloud projects add-iam-policy-binding PROJECT_ID --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" --role=roles/aiplatform.user
+gcloud run deploy study-copilot --source . --region europe-west1 --allow-unauthenticated --max-instances 1 --no-cpu-throttling --memory 1Gi --timeout 300 --set-env-vars GOOGLE_CLOUD_PROJECT=PROJECT_ID,APP_PASSWORD=ΕΝΑΣ_ΚΩΔΙΚΟΣ
+```
+
+Το `APP_PASSWORD` είναι απαραίτητο, αλλιώς όποιος έχει το link ξοδεύει τα credits σου. Το `--max-instances 1` κρατά τις εργασίες σε ένα μέρος, και το `--no-cpu-throttling` αφήνει τη δουλειά να συνεχίζεται στο παρασκήνιο. Το τοπικό μοντέλο δεν υπάρχει online, και το όριο αρχείου είναι 30 MB.
+
 ## Τρέξιμο
 
 ```bash

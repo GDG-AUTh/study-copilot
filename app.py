@@ -1,6 +1,7 @@
 """Study Copilot: turn lecture slides (PDF) into a summary, flashcards and a quiz."""
 from __future__ import annotations
 
+import hmac
 import os
 import threading
 import time
@@ -8,7 +9,7 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 import llm_client
 import study_cache
@@ -27,6 +28,17 @@ def create_app(client=None, cache_dir: str | Path | None = None, ollama_client=N
     cache = Path(cache_dir or os.environ.get("CACHE_DIR", ".cache"))
     state = study_cache.EngineState()
     jobs: dict[str, dict] = {}
+
+    @app.before_request
+    def require_password():
+        """Online, anyone with the link would spend the owner's credits, so ask for a password."""
+        password = os.environ.get("APP_PASSWORD")
+        if not password:
+            return None
+        given = request.authorization.password if request.authorization else None
+        if given and hmac.compare_digest(given.encode(), password.encode()):
+            return None
+        return Response("Χρειάζεται κωδικός.", 401, {"WWW-Authenticate": 'Basic realm="Study Copilot", charset="UTF-8"'})
 
     def error(message: str, status: int):
         return jsonify({"error": message}), status

@@ -1,3 +1,4 @@
+import base64
 import io
 import threading
 
@@ -148,3 +149,24 @@ def test_job_rejects_a_bad_upload_at_once(make_app, fake_client):
 
 def test_unknown_job_is_404(make_app, fake_client):
     assert make_app(fake_client).get("/api/jobs/nope").status_code == 404
+
+
+# Password for the online version
+
+def test_password_protects_every_page_and_the_api(make_app, fake_client, tiny_pdf, monkeypatch):
+    monkeypatch.setenv("APP_PASSWORD", "σωστός-κωδικός")
+    client = make_app(fake_client)
+    assert client.get("/").status_code == 401
+    assert client.get("/app.js").status_code == 401
+    assert client.get("/api/status").status_code == 401
+    assert upload(client, tiny_pdf).status_code == 401
+    assert fake_client.models.calls == 0
+    wrong = {"Authorization": "Basic " + base64.b64encode("x:λάθος".encode()).decode()}
+    assert client.get("/", headers=wrong).status_code == 401
+    right = {"Authorization": "Basic " + base64.b64encode("x:σωστός-κωδικός".encode()).decode()}
+    assert client.get("/", headers=right).status_code == 200
+
+
+def test_without_a_password_set_the_app_is_open(make_app, fake_client, monkeypatch):
+    monkeypatch.delenv("APP_PASSWORD", raising=False)
+    assert make_app(fake_client).get("/").status_code == 200
